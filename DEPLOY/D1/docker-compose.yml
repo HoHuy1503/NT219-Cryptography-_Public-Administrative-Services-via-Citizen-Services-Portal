@@ -1,0 +1,96 @@
+version: "3.9"
+networks:
+  dmz-net:       # Zone 2: API Gateway ↔ Internet
+  internal-net:  # Zone 3: Services nội bộ
+  mgmt-net:      # Zone 4: Vault KMS — không expose ra ngoài
+
+services:
+  # ── ZONE 2: API Gateway (PEP) ──────────────────────────
+  kong:
+    image: kong:3.6
+    networks: [dmz-net, internal-net]
+    ports: ["8443:8443"]
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8443 ssl"
+      KONG_SSL_CERT: /certs/server.crt
+      KONG_SSL_CERT_KEY: /certs/server.key
+    volumes:
+      - ./configs/kong.yml:/kong/kong.yml
+      - ./certs:/certs:ro
+    depends_on: [keycloak, opa, doc-service]
+
+  # ── ZONE 3: IdP (AuthN) ────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    networks: [internal-net]
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${PG_PASS}
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASS}
+    volumes:
+      - ./seeds/realm-govportal.json:/opt/keycloak/data/import/realm.json
+    depends_on: [postgres]
+    ports: ["8080:8080"]
+
+  # ── ZONE 3: AuthZ Engine (PDP) ─────────────────────────
+  opa:
+    image: openpolicyagent/opa:0.63.0
+    networks: [internal-net]
+    command: run --server --log-level=info --log-format=json
+      --set=decision_logs.console=true
+      /policies/govportal.rego
+    volumes:
+      - ./configs/opa-policies:/policies:ro
+    ports: ["8181:8181"]
+
+  # ── ZONE 3: Document Service (FALCON Sign + AEAD) ──────
+  doc-service:
+    build: ./doc-service
+    networks: [internal-net, mgmt-net]
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_TOKEN}
+    depends_on: [vault]
+    ports: ["5000:5000"]
+
+  # ── ZONE 3: QR Service ─────────────────────────────────
+  qr-service:
+    build: ./qr-service
+    networks: [internal-net]
+    environment:
+      REDIS_HOST: redis
+    depends_on: [redis]
+    ports: ["5002:5002"]
+
+  # ── ZONE 4: KMS ────────────────────────────────────────
+  vault:
+    image: hashicorp/vault:1.16
+    networks: [mgmt-net]
+    cap_add: [IPC_LOCK]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports: ["8200:8200"]
+
+  postgres:
+    image: postgres:16
+    networks: [internal-net]
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${PG_PASS}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+
+  redis:   # QR nonce store — single-use enforcement (I7)
+    image: redis:7.2
+    networks: [internal-net]
+
+volumes:
+  postgres-data:
+

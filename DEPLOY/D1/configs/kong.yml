@@ -1,0 +1,60 @@
+_format_version: "3.0"
+
+# ── Services: định nghĩa các backend ──────────────────────
+services:
+  - name: doc-service
+    url: http://doc-service:5000
+    routes:
+      - name: doc-routes
+        paths: ["/api/documents"]
+        strip_path: false
+
+  - name: qr-service
+    url: http://qr-service:5002
+    routes:
+      - name: qr-routes
+        paths: ["/api/qr"]
+        strip_path: false
+
+  - name: keycloak-jwks
+    url: http://keycloak:8080
+    routes:
+      - name: jwks-route
+        paths: ["/realms"]
+        strip_path: false
+
+# ── Plugins: áp dụng toàn cục ─────────────────────────────
+plugins:
+  # 1. Rate limiting (chống DDoS — 100 req/phút/IP)
+  - name: rate-limiting
+    config:
+      minute: 100
+      hour: 3000
+      policy: local
+      fault_tolerant: false
+      hide_client_headers: false
+
+  # 2. JWT verify (AuthN — kiểm tra token hợp lệ)
+  - name: jwt
+    route: doc-routes
+    config:
+      claims_to_verify: [exp]
+      key_claim_name: kid
+      header_names: [authorization]
+      # Chỉ nhận alg EdDSA — chặn alg=none attack (I5)
+
+  - name: jwt
+    route: qr-routes
+    config:
+      claims_to_verify: [exp]
+      key_claim_name: kid
+
+  # 3. Request transformer — thêm user context header
+  - name: request-transformer
+    route: doc-routes
+    config:
+      add:
+        headers:
+          - "X-User-Id:$(jwt.sub)"
+          - "X-User-Role:$(jwt.role)"
+          - "X-User-Dept:$(jwt.dept)"
