@@ -1,0 +1,26 @@
+{
+  "eval_id": "E-Z2",
+  "invariant": "I5",
+  "cases": [
+    {
+      "name": "alg=none attack",
+      "passed": true,
+      "status_code": 401
+    },
+    {
+      "name": "Fake random token",
+      "passed": true,
+      "status_code": 401
+    },
+    {
+      "name": "Expired token",
+      "passed": true,
+      "status_code": 401
+    },
+    {
+      "name": "no token",
+      "passed": true
+    }
+  ],
+  "status": "PASS"
+}
