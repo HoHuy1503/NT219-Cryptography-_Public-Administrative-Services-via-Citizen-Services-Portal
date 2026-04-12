@@ -1,0 +1,31 @@
+- name: Setup VM-Mgmt — Vault KMS + Internal CA
+  hosts: mgmt
+  become: yes
+  roles:
+    - vault_server
+    - internal_ca
+ 
+- name: Setup VM-Internal — Services
+  hosts: internal
+  become: yes
+  vars:
+    vault_addr: http://10.0.3.10:8200
+    vault_token: '{{ lookup("env", "VAULT_DEV_TOKEN") }}'
+  roles:
+    - docker_runtime
+    - keycloak_service
+    - opa_service
+    - doc_service
+    - qr_service
+    - redis_service
+
+- name: Setup VM-DMZ — NGINX API Gateway
+  hosts: dmz
+  become: yes
+  vars:
+    backend_keycloak: 10.0.1.11:8080
+    backend_doc_service: 10.0.1.11:5000
+    backend_qr_service: 10.0.1.11:5002
+  roles:
+    - nginx_gateway
+    - mtls_certs
