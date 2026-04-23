@@ -1,6 +1,14 @@
 - name: Setup VM-Mgmt — Vault KMS + Internal CA
   hosts: mgmt
   become: yes
+  vars:
+    vault_listen_port: '{{ lookup("env", "D2_VAULT_PORT") | default("8200", true) }}'
+    vault_api_addr: '{{ lookup("env", "D2_VAULT_API_ADDR") | default("http://10.0.3.10:8200", true) }}'
+    vault_local_addr: '{{ lookup("env", "D2_VAULT_LOCAL_ADDR") | default("http://127.0.0.1:8200", true) }}'
+    pki_common_name: '{{ lookup("env", "D2_PKI_COMMON_NAME") | default("GovPortal CA", true) }}'
+    pki_allowed_domain: '{{ lookup("env", "D2_PKI_ALLOWED_DOMAIN") | default("govportal.internal", true) }}'
+    pki_role_max_ttl: '{{ lookup("env", "D2_PKI_ROLE_MAX_TTL") | default("2160h", true) }}'
+    falcon_kv_mount: '{{ lookup("env", "D2_FALCON_KV_MOUNT") | default("falcon-keys", true) }}'
   roles:
     - vault_server
     - internal_ca
@@ -9,8 +17,20 @@
   hosts: internal
   become: yes
   vars:
-    vault_addr: http://10.0.3.10:8200
+    vault_addr: '{{ lookup("env", "D2_VAULT_ADDR") | default("http://10.0.3.10:8200", true) }}'
     vault_token: '{{ lookup("env", "VAULT_DEV_TOKEN") }}'
+    falcon_kv_mount: '{{ lookup("env", "D2_FALCON_KV_MOUNT") | default("falcon-keys", true) }}'
+    falcon_rotation_seconds: '{{ lookup("env", "D2_FALCON_ROTATION_SECONDS") | default("15552000", true) }}'
+    doc_service_port: '{{ lookup("env", "D2_DOC_PORT") | default("5000", true) }}'
+    qr_service_port: '{{ lookup("env", "D2_QR_PORT") | default("5002", true) }}'
+    opa_port: '{{ lookup("env", "D2_OPA_PORT") | default("8181", true) }}'
+    keycloak_port: '{{ lookup("env", "D2_KEYCLOAK_PORT") | default("8080", true) }}'
+    redis_host: '{{ lookup("env", "D2_REDIS_HOST") | default("redis", true) }}'
+    keycloak_db_name: '{{ lookup("env", "D2_KEYCLOAK_DB_NAME") | default("keycloak", true) }}'
+    keycloak_db_user: '{{ lookup("env", "D2_KEYCLOAK_DB_USER") | default("keycloak", true) }}'
+    pg_pass: '{{ lookup("env", "D2_PG_PASS") }}'
+    kc_admin_user: '{{ lookup("env", "D2_KC_ADMIN_USER") }}'
+    kc_admin_pass: '{{ lookup("env", "D2_KC_ADMIN_PASS") }}'
   roles:
     - docker_runtime
     - keycloak_service
@@ -23,9 +43,13 @@
   hosts: dmz
   become: yes
   vars:
-    backend_keycloak: 10.0.1.11:8080
-    backend_doc_service: 10.0.1.11:5000
-    backend_qr_service: 10.0.1.11:5002
+    backend_keycloak: '{{ lookup("env", "D2_BACKEND_KEYCLOAK") | default("10.0.1.11:8080", true) }}'
+    backend_opa: '{{ lookup("env", "D2_BACKEND_OPA") | default("10.0.1.11:8181", true) }}'
+    backend_doc_service: '{{ lookup("env", "D2_BACKEND_DOC") | default("10.0.1.11:5000", true) }}'
+    backend_qr_service: '{{ lookup("env", "D2_BACKEND_QR") | default("10.0.1.11:5002", true) }}'
+    gateway_ssl_port: '{{ lookup("env", "D2_GATEWAY_SSL_PORT") | default("8443", true) }}'
+    mtls_ca_cn: '{{ lookup("env", "D2_MTLS_CA_CN") | default("govportal-internal-ca", true) }}'
+    mtls_client_cn: '{{ lookup("env", "D2_MTLS_CLIENT_CN") | default("doc-service.govportal.internal", true) }}'
   roles:
     - nginx_gateway
     - mtls_certs

@@ -1,0 +1,4 @@
+---
+- name: Internal CA bootstrap is handled in vault_server
+  ansible.builtin.debug:
+    msg: "Internal CA already configured by vault_server role"

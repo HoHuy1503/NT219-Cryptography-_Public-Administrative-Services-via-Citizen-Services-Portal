@@ -1,0 +1,27 @@
+---
+- name: Ensure mTLS cert directory exists
+  ansible.builtin.file:
+    path: /etc/nginx/mtls
+    state: directory
+    mode: "0755"
+
+- name: Generate CA and client certs for mTLS testing
+  ansible.builtin.shell: |
+    set -e
+    if [ ! -f /etc/nginx/mtls/ca.crt ]; then
+      openssl genrsa -out /etc/nginx/mtls/ca.key 2048
+      openssl req -x509 -new -nodes -key /etc/nginx/mtls/ca.key \
+        -sha256 -days 365 -out /etc/nginx/mtls/ca.crt \
+        -subj '/CN={{ mtls_ca_cn }}'
+    fi
+
+    if [ ! -f /etc/nginx/mtls/client.crt ] || [ ! -f /etc/nginx/mtls/client.key ]; then
+      openssl genrsa -out /etc/nginx/mtls/client.key 2048
+      openssl req -new -key /etc/nginx/mtls/client.key -out /etc/nginx/mtls/client.csr \
+        -subj '/CN={{ mtls_client_cn }}'
+      openssl x509 -req -in /etc/nginx/mtls/client.csr \
+        -CA /etc/nginx/mtls/ca.crt -CAkey /etc/nginx/mtls/ca.key -CAcreateserial \
+        -out /etc/nginx/mtls/client.crt -days 365 -sha256
+    fi
+  args:
+    executable: /bin/bash

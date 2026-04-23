@@ -1,0 +1,12 @@
+---
+- name: Start Redis container
+  ansible.builtin.shell: |
+    set -e
+    docker network create internal-net >/dev/null 2>&1 || true
+    docker rm -f redis >/dev/null 2>&1 || true
+
+    docker run -d --name redis \
+      --network internal-net \
+      redis:7.2
+  args:
+    executable: /bin/bash

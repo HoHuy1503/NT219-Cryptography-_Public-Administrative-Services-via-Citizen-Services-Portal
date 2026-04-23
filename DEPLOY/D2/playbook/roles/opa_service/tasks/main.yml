@@ -1,0 +1,29 @@
+---
+- name: Ensure govportal policy directory exists
+  ansible.builtin.file:
+    path: /opt/govportal/policies
+    state: directory
+    mode: "0755"
+
+- name: Copy OPA policy
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../D1/configs/opa-policies/govportal.rego"
+    dest: /opt/govportal/policies/govportal.rego
+    mode: "0644"
+
+- name: Start OPA container
+  ansible.builtin.shell: |
+    set -e
+    docker network create internal-net >/dev/null 2>&1 || true
+    docker rm -f opa >/dev/null 2>&1 || true
+
+    docker run -d --name opa \
+      --network internal-net \
+      -p {{ opa_port }}:8181 \
+      -v /opt/govportal/policies:/policies:ro \
+      openpolicyagent/opa:0.63.0 \
+      run --server --log-level=info --log-format=json \
+      --set=decision_logs.console=true \
+      /policies/govportal.rego
+  args:
+    executable: /bin/bash

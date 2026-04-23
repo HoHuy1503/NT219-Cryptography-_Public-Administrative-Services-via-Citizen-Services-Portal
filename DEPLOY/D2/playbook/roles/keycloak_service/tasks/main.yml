@@ -1,0 +1,42 @@
+---
+- name: Ensure govportal seed directory exists
+  ansible.builtin.file:
+    path: /opt/govportal/seeds
+    state: directory
+    mode: "0755"
+
+- name: Copy Keycloak realm seed
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../D1/seeds/realm-govportal.json"
+    dest: /opt/govportal/seeds/realm-govportal.json
+    mode: "0644"
+
+- name: Start postgres and keycloak containers
+  ansible.builtin.shell: |
+    set -e
+    docker network create internal-net >/dev/null 2>&1 || true
+    docker volume create keycloak-postgres-data >/dev/null
+    docker rm -f postgres keycloak >/dev/null 2>&1 || true
+
+    docker run -d --name postgres \
+      --network internal-net \
+      -e POSTGRES_DB='{{ keycloak_db_name }}' \
+      -e POSTGRES_USER='{{ keycloak_db_user }}' \
+      -e POSTGRES_PASSWORD='{{ pg_pass }}' \
+      -v keycloak-postgres-data:/var/lib/postgresql/data \
+      postgres:16
+
+    docker run -d --name keycloak \
+      --network internal-net \
+      -p {{ keycloak_port }}:8080 \
+      -e KC_DB=postgres \
+      -e KC_DB_URL='jdbc:postgresql://postgres:5432/{{ keycloak_db_name }}' \
+      -e KC_DB_USERNAME='{{ keycloak_db_user }}' \
+      -e KC_DB_PASSWORD='{{ pg_pass }}' \
+      -e KEYCLOAK_ADMIN='{{ kc_admin_user }}' \
+      -e KEYCLOAK_ADMIN_PASSWORD='{{ kc_admin_pass }}' \
+      -v /opt/govportal/seeds/realm-govportal.json:/opt/keycloak/data/import/realm.json:ro \
+      quay.io/keycloak/keycloak:24.0 \
+      start-dev --import-realm
+  args:
+    executable: /bin/bash

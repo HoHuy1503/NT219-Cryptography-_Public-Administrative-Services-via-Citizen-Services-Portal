@@ -1,0 +1,73 @@
+---
+- name: Install NGINX and OpenSSL
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - openssl
+    state: present
+    update_cache: true
+
+- name: Ensure gateway cert directory exists
+  ansible.builtin.file:
+    path: /etc/nginx/certs
+    state: directory
+    mode: "0755"
+
+- name: Generate self-signed gateway certificate
+  ansible.builtin.shell: |
+    set -e
+    if [ ! -f /etc/nginx/certs/server.crt ] || [ ! -f /etc/nginx/certs/server.key ]; then
+      openssl req -x509 -nodes -newkey rsa:2048 \
+        -keyout /etc/nginx/certs/server.key \
+        -out /etc/nginx/certs/server.crt \
+        -days 365 \
+        -subj '/CN=govportal-dmz'
+    fi
+  args:
+    executable: /bin/bash
+
+- name: Configure NGINX API gateway
+  ansible.builtin.copy:
+    dest: /etc/nginx/sites-available/govportal.conf
+    mode: "0644"
+    content: |
+      server {
+        listen {{ gateway_ssl_port }} ssl;
+        server_name _;
+
+        ssl_certificate /etc/nginx/certs/server.crt;
+        ssl_certificate_key /etc/nginx/certs/server.key;
+
+        location /auth/ {
+          proxy_pass http://{{ backend_keycloak }}/;
+        }
+
+        location /opa/ {
+          proxy_pass http://{{ backend_opa }}/;
+        }
+
+        location /doc/ {
+          proxy_pass http://{{ backend_doc_service }}/;
+        }
+
+        location /qr/ {
+          proxy_pass http://{{ backend_qr_service }}/;
+        }
+      }
+
+- name: Enable govportal site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/govportal.conf
+    dest: /etc/nginx/sites-enabled/govportal.conf
+    state: link
+
+- name: Remove default NGINX site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+
+- name: Restart NGINX
+  ansible.builtin.systemd:
+    name: nginx
+    state: restarted
+    enabled: true

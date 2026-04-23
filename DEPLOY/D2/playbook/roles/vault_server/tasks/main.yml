@@ -1,64 +1,98 @@
+---
+- name: Install Vault prerequisites
+  ansible.builtin.apt:
+    name:
+      - gnupg
+      - ca-certificates
+      - jq
+    state: present
+    update_cache: true
+
 - name: Add HashiCorp GPG key
-  apt_key:
+  ansible.builtin.apt_key:
     url: https://apt.releases.hashicorp.com/gpg
     state: present
  
 - name: Add HashiCorp repo
-  apt_repository:
+  ansible.builtin.apt_repository:
     repo: deb https://apt.releases.hashicorp.com jammy main
     state: present
  
 - name: Install Vault
-  apt:
+  ansible.builtin.apt:
     name: vault
     state: present
-    update_cache: yes
+    update_cache: true
+
+- name: Ensure Vault data directory exists
+  ansible.builtin.file:
+    path: /opt/vault/data
+    state: directory
+    mode: "0755"
  
 - name: Create Vault config
-  copy:
+  ansible.builtin.copy:
     dest: /etc/vault.d/vault.hcl
+    mode: "0644"
     content: |
       storage "file" { path = "/opt/vault/data" }
       listener "tcp" {
-        address = "0.0.0.0:8200"
+        address = "0.0.0.0:{{ vault_listen_port }}"
         tls_disable = true
       }
-      api_addr = "http://10.0.3.10:8200"
+      api_addr = "{{ vault_api_addr }}"
       ui = true
  
 - name: Start and enable Vault
-  systemd:
+  ansible.builtin.systemd:
     name: vault
     state: started
-    enabled: yes
+    enabled: true
  
 - name: Wait for Vault to be ready
-  wait_for:
-    port: 8200
+  ansible.builtin.wait_for:
+    port: '{{ vault_listen_port | int }}'
     delay: 3
     timeout: 30
  
-- name: Init Vault (only if not initialized)
-  shell: |
-    if vault status -format=json 2>/dev/null | grep -q '"initialized":false'; then
+- name: Initialize and unseal Vault when needed
+  ansible.builtin.shell: |
+    set -e
+    STATUS_JSON=$(vault status -format=json)
+
+    if echo "$STATUS_JSON" | jq -e '.initialized == false' >/dev/null; then
       vault operator init -key-shares=1 -key-threshold=1 -format=json > /root/vault-init.json
-      vault operator unseal $(jq -r .unseal_keys_b64[0] /root/vault-init.json)
-      echo 'Vault initialized and unsealed'
+      vault operator unseal "$(jq -r .unseal_keys_b64[0] /root/vault-init.json)"
+      echo 'initialized'
+    elif echo "$STATUS_JSON" | jq -e '.sealed == true' >/dev/null && [ -f /root/vault-init.json ]; then
+      vault operator unseal "$(jq -r .unseal_keys_b64[0] /root/vault-init.json)"
+      echo 'unsealed'
     else
-      echo 'Vault already initialized'
+      echo 'ready'
     fi
   environment:
-    VAULT_ADDR: http://127.0.0.1:8200
+    VAULT_ADDR: '{{ vault_local_addr }}'
+  args:
+    executable: /bin/bash
+  register: vault_init_output
+  changed_when: "'initialized' in vault_init_output.stdout or 'unsealed' in vault_init_output.stdout"
  
 - name: Bootstrap Vault secrets engines
-  shell: |
-    export VAULT_ADDR=http://127.0.0.1:8200
-    export VAULT_TOKEN=$(jq -r .root_token /root/vault-init.json)
-    vault secrets enable transit 2>/dev/null || true
-    vault write -f transit/keys/falcon-doc-signing type=ed25519
-    vault write -f transit/keys/doc-encryption type=aes256-gcm96
-    vault secrets enable pki 2>/dev/null || true
-    vault secrets tune -max-lease-ttl=87600h pki
-    vault write -f pki/root/generate/internal common_name='GovPortal CA' ttl=87600h
-    vault write pki/roles/service-cert allowed_domains=govportal.internal
-      allow_subdomains=true max_ttl=2160h
+  ansible.builtin.shell: |
+    set -e
+    export VAULT_ADDR='{{ vault_local_addr }}'
+    export VAULT_TOKEN="$(jq -r .root_token /root/vault-init.json)"
+
+    vault secrets enable transit >/dev/null 2>&1 || true
+    vault write -f transit/keys/doc-encryption type=aes256-gcm96 >/dev/null
+    vault secrets enable -path={{ falcon_kv_mount }} kv-v2 >/dev/null 2>&1 || true
+
+    vault secrets enable pki >/dev/null 2>&1 || true
+    vault secrets tune -max-lease-ttl=87600h pki >/dev/null
+    vault write -f pki/root/generate/internal common_name='{{ pki_common_name }}' ttl=87600h >/dev/null 2>&1 || true
+    vault write pki/roles/service-cert allowed_domains={{ pki_allowed_domain }} allow_subdomains=true max_ttl={{ pki_role_max_ttl }} >/dev/null
+
+    touch /root/.vault_bootstrapped
+  args:
+    executable: /bin/bash
+    creates: /root/.vault_bootstrapped
