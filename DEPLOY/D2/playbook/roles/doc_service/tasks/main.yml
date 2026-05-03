@@ -1,0 +1,87 @@
+- name: Ensure doc-service source directory exists
+  file:
+    path: /opt/govportal/doc-service
+    state: directory
+    mode: '0755'
+
+- name: Write doc-service app
+  copy:
+    dest: /opt/govportal/doc-service/app.py
+    mode: '0644'
+    content: |
+      from flask import Flask, request, jsonify
+      import hvac, hashlib, base64, os, time
+
+      app = Flask(__name__)
+      vc = hvac.Client(
+          url=os.environ.get("VAULT_ADDR", "http://10.0.3.10:8200"),
+          token=os.environ.get("VAULT_TOKEN", "")
+      )
+
+
+      @app.route("/api/documents/sign", methods=["POST"])
+      def sign_document():
+          data = request.get_json()
+          doc_b64 = data["document_base64"]
+          doc_bytes = base64.b64decode(doc_b64)
+          doc_hash = hashlib.sha256(doc_bytes).hexdigest()
+
+          sig_resp = vc.secrets.transit.sign_data(
+              name="falcon-doc-signing",
+              hash_input=doc_b64,
+              hash_algorithm="sha2-256"
+          )
+          signature = sig_resp["data"]["signature"]
+
+          enc_resp = vc.secrets.transit.encrypt_data(
+              name="doc-encryption",
+              plaintext=doc_b64
+          )["data"]
+
+          return jsonify({
+              "doc_id": doc_hash[:16],
+              "doc_hash_sha256": doc_hash,
+              "signature": signature,
+              "ciphertext": enc_resp["ciphertext"],
+              "key_version": enc_resp["key_version"],
+              "signed_at": time.time()
+          }), 201
+
+
+      @app.route("/health")
+      def health():
+          return jsonify({"status": "ok"})
+
+
+      if __name__ == "__main__":
+          app.run(host="0.0.0.0", port=5000)
+
+- name: Write doc-service Dockerfile
+  copy:
+    dest: /opt/govportal/doc-service/Dockerfile
+    mode: '0644'
+    content: |
+      FROM python:3.11-slim
+      WORKDIR /app
+      RUN pip install --no-cache-dir flask hvac
+      COPY app.py .
+      EXPOSE 5000
+      CMD ["python", "app.py"]
+
+- name: Build and run doc-service container
+  shell: |
+    set -e
+    docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net
+    docker network inspect mgmt-net >/dev/null 2>&1 || docker network create mgmt-net
+    docker build -t govportal-doc-service /opt/govportal/doc-service
+    docker rm -f doc-service >/dev/null 2>&1 || true
+    docker run -d --name doc-service \
+      --network internal-net \
+      -p 5000:5000 \
+      -e VAULT_ADDR="{{ vault_addr | default('http://10.0.3.10:8200') }}" \
+      -e VAULT_TOKEN="{{ vault_token | default('') }}" \
+      govportal-doc-service
+    docker network connect mgmt-net doc-service >/dev/null 2>&1 || true
+  args:
+    executable: /bin/bash
+  changed_when: true

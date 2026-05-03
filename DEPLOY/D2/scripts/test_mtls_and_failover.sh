@@ -1,4 +1,9 @@
 #!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 VAULT_VM="10.0.3.10"
 INTERNAL_VM="10.0.1.11"
 VAULT_TOKEN=$(ssh vagrant@$VAULT_VM 'jq -r .root_token /root/vault-init.json')

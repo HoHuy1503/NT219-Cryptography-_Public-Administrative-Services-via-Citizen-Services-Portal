@@ -1,19 +1,34 @@
+---
 - name: Add HashiCorp GPG key
   apt_key:
     url: https://apt.releases.hashicorp.com/gpg
     state: present
- 
+
 - name: Add HashiCorp repo
   apt_repository:
     repo: deb https://apt.releases.hashicorp.com jammy main
     state: present
- 
-- name: Install Vault
+
+- name: Install Vault dependencies
   apt:
-    name: vault
+    name:
+      - vault
+      - jq
     state: present
     update_cache: yes
- 
+
+- name: Ensure Vault directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: vault
+    group: vault
+    mode: '0750'
+  loop:
+    - /etc/vault.d
+    - /opt/vault
+    - /opt/vault/data
+
 - name: Create Vault config
   copy:
     dest: /etc/vault.d/vault.hcl
@@ -25,40 +40,55 @@
       }
       api_addr = "http://10.0.3.10:8200"
       ui = true
- 
+
 - name: Start and enable Vault
   systemd:
     name: vault
     state: started
     enabled: yes
- 
+
 - name: Wait for Vault to be ready
   wait_for:
     port: 8200
     delay: 3
     timeout: 30
- 
-- name: Init Vault (only if not initialized)
-  shell: |
-    if vault status -format=json 2>/dev/null | grep -q '"initialized":false'; then
-      vault operator init -key-shares=1 -key-threshold=1 -format=json > /root/vault-init.json
-      vault operator unseal $(jq -r .unseal_keys_b64[0] /root/vault-init.json)
-      echo 'Vault initialized and unsealed'
-    else
-      echo 'Vault already initialized'
-    fi
+
+- name: Check Vault initialization status
+  command: vault status -format=json
+  register: vault_status
+  failed_when: false
+  changed_when: false
   environment:
     VAULT_ADDR: http://127.0.0.1:8200
- 
+
+- name: Init Vault (only if not initialized)
+  shell: |
+    set -euo pipefail
+    vault operator init -key-shares=1 -key-threshold=1 -format=json > /root/vault-init.json
+    vault operator unseal "$(jq -r .unseal_keys_b64[0] /root/vault-init.json)"
+    echo 'Vault initialized and unsealed'
+  when: vault_status.stdout is search('"initialized":false')
+  args:
+    executable: /bin/bash
+  environment:
+    VAULT_ADDR: http://127.0.0.1:8200
+
 - name: Bootstrap Vault secrets engines
   shell: |
+    set -euo pipefail
     export VAULT_ADDR=http://127.0.0.1:8200
     export VAULT_TOKEN=$(jq -r .root_token /root/vault-init.json)
-    vault secrets enable transit 2>/dev/null || true
-    vault write -f transit/keys/falcon-doc-signing type=ed25519
-    vault write -f transit/keys/doc-encryption type=aes256-gcm96
-    vault secrets enable pki 2>/dev/null || true
+
+    vault secrets list -format=json | jq -e 'has("transit/")' >/dev/null || vault secrets enable transit
+    vault read transit/keys/falcon-doc-signing >/dev/null 2>&1 || vault write -f transit/keys/falcon-doc-signing type=ed25519 >/dev/null
+    vault read transit/keys/doc-encryption >/dev/null 2>&1 || vault write -f transit/keys/doc-encryption type=aes256-gcm96 >/dev/null
+
+    vault secrets list -format=json | jq -e 'has("pki/")' >/dev/null || vault secrets enable pki
     vault secrets tune -max-lease-ttl=87600h pki
-    vault write -f pki/root/generate/internal common_name='GovPortal CA' ttl=87600h
-    vault write pki/roles/service-cert allowed_domains=govportal.internal
-      allow_subdomains=true max_ttl=2160h
+    vault read pki/cert/ca >/dev/null 2>&1 || vault write -f pki/root/generate/internal common_name='GovPortal CA' ttl=87600h >/dev/null
+    vault read pki/roles/service-cert >/dev/null 2>&1 || vault write pki/roles/service-cert \
+      allowed_domains=govportal.internal \
+      allow_subdomains=true \
+      max_ttl=2160h
+  args:
+    executable: /bin/bash

@@ -1,0 +1,80 @@
+- name: Ensure qr-service source directory exists
+  file:
+    path: /opt/govportal/qr-service
+    state: directory
+    mode: '0755'
+
+- name: Write qr-service app
+  copy:
+    dest: /opt/govportal/qr-service/app.py
+    mode: '0644'
+    content: |
+      import redis, json, uuid, time, base64, os
+      from flask import Flask, request, jsonify
+      from cryptography.fernet import Fernet
+
+      app = Flask(__name__)
+      r = redis.Redis(host=os.environ.get("REDIS_HOST", "redis"),
+                      port=6379, decode_responses=True)
+
+      qr_key = Fernet.generate_key()
+      fernet = Fernet(qr_key)
+      qr_ttl = 300
+
+
+      @app.route("/api/qr/generate", methods=["POST"])
+      def generate_qr():
+          user_id = request.get_json()["user_id"]
+          nonce = str(uuid.uuid4())
+
+          payload = json.dumps({
+              "user_id": user_id,
+              "nonce": nonce,
+              "iat": time.time(),
+              "exp": time.time() + qr_ttl
+          })
+
+          encrypted = fernet.encrypt(payload.encode())
+          qr_data = base64.urlsafe_b64encode(encrypted).decode()
+          r.setex(f"qr_pending:{nonce}", qr_ttl, user_id)
+          return jsonify({
+              "nonce": nonce,
+              "qr_data": qr_data,
+              "expires_in": qr_ttl
+          }), 201
+
+
+      @app.route("/health")
+      def health():
+          return jsonify({"status": "ok"})
+
+
+      if __name__ == "__main__":
+          app.run(host="0.0.0.0", port=5002)
+
+- name: Write qr-service Dockerfile
+  copy:
+    dest: /opt/govportal/qr-service/Dockerfile
+    mode: '0644'
+    content: |
+      FROM python:3.11-slim
+      WORKDIR /app
+      RUN pip install --no-cache-dir flask redis cryptography
+      COPY app.py .
+      EXPOSE 5002
+      CMD ["python", "app.py"]
+
+- name: Build and run qr-service container
+  shell: |
+    set -e
+    docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net
+    docker build -t govportal-qr-service /opt/govportal/qr-service
+    docker rm -f qr-service >/dev/null 2>&1 || true
+    docker run -d --name qr-service \
+      --network internal-net \
+      -p 5002:5002 \
+      -e REDIS_HOST=redis \
+      govportal-qr-service
+  args:
+    executable: /bin/bash
+  changed_when: true

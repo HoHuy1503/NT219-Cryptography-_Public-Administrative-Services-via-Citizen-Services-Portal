@@ -1,0 +1,9 @@
+- name: Run Redis container
+  shell: |
+    set -e
+    docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net
+    docker rm -f redis >/dev/null 2>&1 || true
+    docker run -d --name redis --network internal-net redis:7.2
+  args:
+    executable: /bin/bash
+  changed_when: true
