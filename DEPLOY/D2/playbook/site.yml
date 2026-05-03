@@ -27,5 +27,5 @@
     backend_doc_service: 10.0.1.11:5000
     backend_qr_service: 10.0.1.11:5002
   roles:
-    - nginx_gateway
     - mtls_certs
+    - nginx_gateway

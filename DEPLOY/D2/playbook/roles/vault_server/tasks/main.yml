@@ -67,7 +67,7 @@
     vault operator init -key-shares=1 -key-threshold=1 -format=json > /root/vault-init.json
     vault operator unseal "$(jq -r .unseal_keys_b64[0] /root/vault-init.json)"
     echo 'Vault initialized and unsealed'
-  when: vault_status.stdout is search('"initialized":false')
+  when: not (vault_status.stdout | from_json).initialized
   args:
     executable: /bin/bash
   environment:
