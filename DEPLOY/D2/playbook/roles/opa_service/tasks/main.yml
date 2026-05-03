@@ -1,0 +1,71 @@
+- name: Ensure OPA policy directory exists
+  file:
+    path: /opt/govportal/opa
+    state: directory
+    mode: '0755'
+
+- name: Write OPA policy file
+  copy:
+    dest: /opt/govportal/opa/govportal.rego
+    mode: '0644'
+    content: |
+      package govportal.authz
+      import future.keywords.if
+      import future.keywords.in
+
+      default allow := false
+
+      allow if {
+        input.user.role == "CITIZEN"
+        input.action in {"read", "submit"}
+        input.resource.type == "application"
+        input.resource.owner == input.user.id
+      }
+
+      allow if {
+        input.user.role == "OFFICER"
+        input.action in {"read", "approve", "reject", "comment"}
+        input.resource.type == "application"
+        input.resource.dept == input.user.dept
+        is_business_hours
+      }
+
+      allow if {
+        input.user.role == "ADMIN"
+        input.action in {"create_user", "deactivate_user", "assign_role"}
+        input.resource.type == "user_management"
+      }
+
+      allow if {
+        input.user.role == "AUDITOR"
+        input.action == "read"
+        input.resource.type == "audit_log"
+      }
+
+      is_business_hours if {
+        h := time.clock(time.now_ns())[0]
+        h >= 7
+        h < 17
+        day := time.weekday(time.now_ns())
+        day in {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday"}
+      }
+
+      deny_reason := "No matching allow rule - deny by default" if {
+        not allow
+      }
+
+- name: Run OPA container
+  shell: |
+    set -e
+    docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net
+    docker rm -f opa >/dev/null 2>&1 || true
+    docker run -d --name opa \
+      --network internal-net \
+      -p 8181:8181 \
+      -v /opt/govportal/opa/govportal.rego:/policies/govportal.rego:ro \
+      openpolicyagent/opa:0.63.0 \
+      run --server --log-level=info --log-format=json \
+      --set=decision_logs.console=true /policies/govportal.rego
+  args:
+    executable: /bin/bash
+  changed_when: true

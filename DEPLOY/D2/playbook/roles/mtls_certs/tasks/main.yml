@@ -1,0 +1,24 @@
+- name: Ensure OpenSSL is installed
+  apt:
+    name: openssl
+    state: present
+    update_cache: yes
+
+- name: Ensure NGINX cert directory exists
+  file:
+    path: /etc/nginx/certs
+    state: directory
+    mode: '0755'
+
+- name: Generate self-signed certificate for gateway
+  shell: |
+    set -e
+    if [ ! -f /etc/nginx/certs/server.crt ] || [ ! -f /etc/nginx/certs/server.key ]; then
+      openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -subj "/CN=govportal-dmz" \
+        -keyout /etc/nginx/certs/server.key \
+        -out /etc/nginx/certs/server.crt
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
