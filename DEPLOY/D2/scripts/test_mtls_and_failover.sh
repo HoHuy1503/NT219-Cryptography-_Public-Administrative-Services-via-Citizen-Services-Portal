@@ -2,53 +2,45 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP_DIR="${TMPDIR:-/tmp}/govportal-mtls"
-mkdir -p "$TMP_DIR"
+D2_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VAULT_VM="10.0.3.10"
-INTERNAL_VM="10.0.1.11"
-VAULT_TOKEN=$(ssh vagrant@$VAULT_VM 'jq -r .root_token /root/vault-init.json')
- 
+cd "$D2_DIR"
+
+ssh_vm() {
+  local vm_name="$1"
+  shift
+  local remote_command="$1"
+  vagrant ssh "$vm_name" -c "$remote_command"
+}
+
 echo '=== TEST 1: Xin cert từ Vault CA ==='
-CERT_JSON=$(curl -s -X POST http://$VAULT_VM:8200/v1/pki/issue/service-cert \
-  -H "X-Vault-Token: $VAULT_TOKEN" \
-  -d '{"common_name":"doc-service.govportal.internal"}')
-echo "$CERT_JSON" | jq -r .data.certificate > "$TMP_DIR/doc.crt"
-echo "$CERT_JSON" | jq -r .data.private_key > "$TMP_DIR/doc.key"
-echo "$CERT_JSON" | jq -r .data.issuing_ca  > "$TMP_DIR/ca.crt"
+VAULT_TOKEN=$(ssh_vm mgmt 'sudo jq -r .root_token /root/vault-init.json' | tail -n1)
+ssh_vm mgmt "sudo bash -lc 'set -euo pipefail; CERT_JSON=\$(curl -s -X POST http://127.0.0.1:8200/v1/pki/issue/service-cert -H \"X-Vault-Token: $VAULT_TOKEN\" -d \"{\\\"common_name\\\":\\\"doc-service.govportal.internal\\\"}\"); curl --cert <(echo \"\$CERT_JSON\" | jq -r .data.certificate) --key <(echo \"\$CERT_JSON\" | jq -r .data.private_key) --cacert <(echo \"\$CERT_JSON\" | jq -r .data.issuing_ca) http://127.0.0.1:8200/v1/sys/health | jq .initialized'"
 echo '[OK] Cert issued từ Internal CA'
- 
+
 echo '=== TEST 2: mTLS call với cert hợp lệ → phải PASS ==='
-curl --cert "$TMP_DIR/doc.crt" --key "$TMP_DIR/doc.key" --cacert "$TMP_DIR/ca.crt" \
-  http://$VAULT_VM:8200/v1/sys/health | jq .initialized
-# Kết quả: true
- 
+echo '[OK] mTLS call đã hoàn tất trong bước trên'
+
 echo '=== TEST 3: Không có cert → phải FAIL (Zone 4 requires mTLS) ==='
-# (Vault dev mode không enforce mTLS — trong production config thì có)
 echo '[INFO] mTLS enforcement: sử dụng Vault TLS config trong production'
- 
+
 echo '=== TEST 4: Vault HA Failover Test ==='
-# Ký tài liệu bình thường
-curl -s http://$INTERNAL_VM:5000/health | jq .status
- 
-# Kill Vault
+ssh_vm internal 'curl -s http://127.0.0.1:5000/health | jq .status'
+
 echo 'Kill Vault...'
-ssh vagrant@$VAULT_VM 'sudo systemctl stop vault'
+ssh_vm mgmt 'sudo systemctl stop vault'
 sleep 3
- 
-# Doc-service vẫn alive (cached token)
-HEALTH=$(curl -s --connect-timeout 3 http://$INTERNAL_VM:5000/health 2>/dev/null || echo 'down')
+
+HEALTH=$(ssh_vm internal "curl -s --connect-timeout 3 http://127.0.0.1:5000/health 2>/dev/null | jq -r .status 2>/dev/null || echo 'down'" | tr -d '\r' | tail -n1)
 echo "Doc-service khi Vault down: $HEALTH"
- 
-# Restart Vault
+
 echo 'Restart Vault...'
-ssh vagrant@$VAULT_VM 'sudo systemctl start vault'
+ssh_vm mgmt 'sudo systemctl start vault'
 sleep 5
-UNSEAL_KEY=$(ssh vagrant@$VAULT_VM 'jq -r .unseal_keys_b64[0] /root/vault-init.json')
-ssh vagrant@$VAULT_VM "VAULT_ADDR=http://127.0.0.1:8200 vault operator unseal $UNSEAL_KEY"
+UNSEAL_KEY=$(ssh_vm mgmt 'sudo jq -r .unseal_keys_b64[0] /root/vault-init.json' | tail -n1)
+ssh_vm mgmt "VAULT_ADDR=http://127.0.0.1:8200 vault operator unseal $UNSEAL_KEY"
 sleep 5
- 
-# Doc-service tự reconnect
-HEALTH2=$(curl -s http://$INTERNAL_VM:5000/health | jq -r .status)
+
+HEALTH2=$(ssh_vm internal 'curl -s http://127.0.0.1:5000/health | jq -r .status' | tr -d '\r' | tail -n1)
 echo "Doc-service sau khi Vault recover: $HEALTH2"
 [ "$HEALTH2" = 'ok' ] && echo '[PASS] Failover OK' || echo '[FAIL] Failover failed'
