@@ -8,8 +8,14 @@ app = Flask(__name__)
 r = redis.Redis(host=os.environ.get("REDIS_HOST","redis"),
                 port=6379, decode_responses=True)
  
-# Trong production: lấy key từ Vault. Dev: generate mỗi lần start.
-QR_KEY = Fernet.generate_key()
+# Trong production: lấy key từ Vault/KMS. Dev có thể truyền QR_FERNET_KEY để
+# tái lập demo, nếu không sẽ generate mới mỗi lần start.
+QR_KEY = os.environ.get("QR_FERNET_KEY")
+if QR_KEY:
+    QR_KEY = QR_KEY.encode()
+else:
+    QR_KEY = Fernet.generate_key()
+
 fernet = Fernet(QR_KEY)
 QR_TTL = 300  # 5 phút
  

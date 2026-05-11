@@ -8,6 +8,17 @@ echo '======================================'
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+echo '=== START D1 STACK ==='
+cd "$ROOT_DIR/DEPLOY/D1"
+docker compose up -d --build >/dev/null
+sleep 45
+set -a
+source .env
+set +a
+bash scripts/bootstrap_vault.sh >/dev/null
+bash scripts/seed_test_data.sh >/dev/null
+cd "$ROOT_DIR"
+
 bash "$ROOT_DIR/EVAL/E-C/run_e_c1.sh"
 python3 "$ROOT_DIR/EVAL/E-C/run_e_c2.py"
 python3 "$ROOT_DIR/EVAL/E-C/run_e_c3.py"
@@ -26,7 +37,7 @@ for f in "$ROOT_DIR"/EVAL/E-C/*.json \
          "$ROOT_DIR"/EVAL/E-Z/*.json \
          "$ROOT_DIR"/EVAL/E-X/*.json
 do
-  ID=$(jq -r .eval_id "$f")
-  STATUS=$(jq -r .status "$f")
+  ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("eval_id", ""))' "$f")
+  STATUS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", ""))' "$f")
   echo "  $ID: $STATUS"
 done

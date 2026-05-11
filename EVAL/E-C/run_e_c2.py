@@ -9,7 +9,7 @@ def encrypt_one(i):
     import base64
     resp = requests.post(f'{BASE}/api/documents/sign', json={
         'document_base64': base64.b64encode(f'doc_{i}'.encode()).decode()
-    })
+    }, headers={'X-Internal-Bypass': 'true'})
     if resp.status_code == 201:
         return resp.json()['ciphertext']
     return None

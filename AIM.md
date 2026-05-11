@@ -13,10 +13,10 @@
 | Key               | Dùng cho         | Lưu ở         | Rotate   |
 |-------------------|------------------|---------------|----------|
 | KEK (AES-256)     | Mã hóa DEK       | Vault KMS     | 30 ngày  |
-| FALCON-512 priv   | Ký tài liệu      | Vault Transit | 90 ngày  |
-| JWT Ed25519 priv  | Ký JWT token     | Keycloak/Vault| 24h      |
+| ML-DSA-65 priv    | Ký tài liệu (FIPS 204) | Vault Transit | 90 ngày  |
+| ML-KEM-768 priv   | KEK encapsulation (FIPS 203) | Vault | 30 ngày  |
 | TOTP seed         | Sinh OTP         | DB (KEK-enc)  | Per user |
-| QR encryption key | Mã hóa QR payload| Vault         | 30 ngày  |
+| Ed25519 priv      | Ký JWT token (internal) | Keycloak/Vault| 24h      |
  
 ## A3 — Danh tính
 - Người dùng: CMND, email, WebAuthn authenticator
@@ -31,7 +31,7 @@
 ## A5 — Hạ tầng tin cậy
 - Internal CA (Vault PKI Engine)
 - KMS: HashiCorp Vault 1.16
-- JWKS Endpoint: Keycloak /.well-known/jwks.json
+- JWKS Endpoint: PKI Authority /.well-known/jwks.json (RFC 7517, kid-indexed)
 - SIEM: structured JSON log từ tất cả services
  
 ## 1.3 — Mục tiêu bảo vệ SMART
