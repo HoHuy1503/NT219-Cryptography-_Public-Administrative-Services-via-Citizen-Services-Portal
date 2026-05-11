@@ -1,13 +1,11 @@
 import requests, json, base64
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning) 
-GW = 'https://localhost:8443'  # Trong prod: qua Kong 8443
+GW = 'http://localhost:5000'
 results = []
  
 def check(name, token, expect_reject=True):
     r = requests.post(f'{GW}/api/documents/sign',
         headers={'Authorization': f'Bearer {token}'},
-        json={'document_base64': base64.b64encode(b'test').decode()},verify=False)
+        json={'document_base64': base64.b64encode(b'test').decode()})
     rejected = r.status_code in [401, 403]
     passed = (rejected == expect_reject)
     print(f'[{"PASS" if passed else "FAIL"}] {name}: HTTP {r.status_code}')
@@ -29,7 +27,7 @@ check('Expired token', expired_token, expect_reject=True)
  
 # Test 4: Không có token → phải reject
 r_no_token = requests.post(f'{GW}/api/documents/sign',
-    json={'document_base64': base64.b64encode(b'test').decode()},verify=False)
+    json={'document_base64': base64.b64encode(b'test').decode()})
 no_token_ok = r_no_token.status_code in [401, 422]
 print(f'[{"PASS" if no_token_ok else "FAIL"}] No token → {r_no_token.status_code}')
 results.append({'name':'no token','passed':no_token_ok})

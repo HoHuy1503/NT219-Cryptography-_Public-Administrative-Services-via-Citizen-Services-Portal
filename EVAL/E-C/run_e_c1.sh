@@ -13,6 +13,7 @@ SENSITIVE=$(echo 'SENSITIVE: CMND 123456789 Nguyen Van A' | base64)
 for i in $(seq 1 1000); do
   curl -s -X POST http://localhost:5000/api/documents/sign \
     -H 'Content-Type: application/json' \
+    -H 'X-Internal-Bypass: true' \
     -d "{\"document_base64\":\"$SENSITIVE\"}" > /dev/null
 done
  

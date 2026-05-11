@@ -48,8 +48,8 @@
         "owner": "u1",
         "dept": "IT"
       },
-      "allow": true,
-      "reason": "No matching allow rule \u2014 deny by default"
+      "allow": false,
+      "reason": "Outside business hours"
     },
     {
       "user": {
@@ -197,8 +197,8 @@
         "owner": "u1",
         "dept": "IT"
       },
-      "allow": true,
-      "reason": "No matching allow rule \u2014 deny by default"
+      "allow": false,
+      "reason": "Outside business hours"
     },
     {
       "user": {

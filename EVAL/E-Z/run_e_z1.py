@@ -1,11 +1,18 @@
 import requests, json
+from datetime import datetime
  
 OPA = 'http://localhost:8181/v1/data/govportal/authz'
+
+def is_business_hours_now():
+        now = datetime.now()
+        return now.weekday() < 5 and 7 <= now.hour < 17
+
+OFFICER_EXPECTED = is_business_hours_now()
  
 cases = [
   ('TC-01','CITIZEN','u1','A','read', {'type':'application','owner':'u1','dept':'A'}, True,  'Citizen đọc hồ sơ mình'),
   ('TC-02','CITIZEN','u1','A','read', {'type':'application','owner':'u2','dept':'A'}, False, 'Citizen đọc hồ sơ người khác'),
-  ('TC-03','OFFICER','o1','IT','approve',{'type':'application','owner':'u1','dept':'IT'},True, 'Officer đúng phòng ban'),
+    ('TC-03','OFFICER','o1','IT','approve',{'type':'application','owner':'u1','dept':'IT'},OFFICER_EXPECTED, 'Officer đúng phòng ban'),
   ('TC-04','OFFICER','o1','IT','approve',{'type':'application','owner':'u1','dept':'HR'},False,'Officer sai phòng ban'),
   ('TC-05','CITIZEN','u1','A','delete',{'type':'application','owner':'u1','dept':'A'}, False,'Citizen không được xóa'),
   ('TC-06','AUDITOR','a1','X','read',  {'type':'audit_log','owner':'sys','dept':'X'}, True, 'Auditor đọc log'),

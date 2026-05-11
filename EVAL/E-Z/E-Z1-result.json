@@ -16,7 +16,7 @@
     {
       "id": "TC-03",
       "passed": true,
-      "reason": "No matching allow rule \u2014 deny by default"
+      "reason": "Outside business hours"
     },
     {
       "id": "TC-04",

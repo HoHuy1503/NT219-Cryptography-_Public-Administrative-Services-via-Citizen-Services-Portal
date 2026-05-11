@@ -16,6 +16,8 @@ services:
       KONG_PROXY_LISTEN: "0.0.0.0:8443 ssl"
       KONG_SSL_CERT: /certs/server.crt
       KONG_SSL_CERT_KEY: /certs/server.key
+    env_file:
+      - .env
     volumes:
       - ./configs/kong.yml:/kong/kong.yml
       - ./certs:/certs:ro
@@ -26,6 +28,8 @@ services:
     image: quay.io/keycloak/keycloak:24.0
     networks: [internal-net]
     command: start-dev --import-realm
+    env_file:
+      - .env
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
@@ -42,9 +46,13 @@ services:
   opa:
     image: openpolicyagent/opa:0.63.0
     networks: [internal-net]
-    command: run --server --log-level=info --log-format=json
-      --set=decision_logs.console=true
-      /policies/govportal.rego
+    command:
+      - run
+      - --server
+      - --log-level=info
+      - --log-format=json
+      - --set=decision_logs.console=true
+      - /policies/govportal.rego
     volumes:
       - ./configs/opa-policies:/policies:ro
     ports: ["8181:8181"]
@@ -53,6 +61,8 @@ services:
   doc-service:
     build: ./doc-service
     networks: [internal-net, mgmt-net]
+    env_file:
+      - .env
     environment:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: ${VAULT_DEV_TOKEN}
@@ -63,8 +73,11 @@ services:
   qr-service:
     build: ./qr-service
     networks: [internal-net]
+    env_file:
+      - .env
     environment:
       REDIS_HOST: redis
+      QR_FERNET_KEY: ${QR_FERNET_KEY:-}
     depends_on: [redis]
     ports: ["5002:5002"]
 
@@ -72,6 +85,9 @@ services:
   vault:
     image: hashicorp/vault:1.16
     networks: [mgmt-net]
+    command: server -dev
+    env_file:
+      - .env
     cap_add: [IPC_LOCK]
     environment:
       VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN}
@@ -81,6 +97,8 @@ services:
   postgres:
     image: postgres:16
     networks: [internal-net]
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak

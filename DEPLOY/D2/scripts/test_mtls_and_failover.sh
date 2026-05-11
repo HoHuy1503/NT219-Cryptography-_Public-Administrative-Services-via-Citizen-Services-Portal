@@ -1,8 +1,9 @@
-#!/bin/bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TMP_DIR="${TMPDIR:-/tmp}/govportal-mtls"
+mkdir -p "$TMP_DIR"
 
 VAULT_VM="10.0.3.10"
 INTERNAL_VM="10.0.1.11"
@@ -12,13 +13,13 @@ echo '=== TEST 1: Xin cert từ Vault CA ==='
 CERT_JSON=$(curl -s -X POST http://$VAULT_VM:8200/v1/pki/issue/service-cert \
   -H "X-Vault-Token: $VAULT_TOKEN" \
   -d '{"common_name":"doc-service.govportal.internal"}')
-echo $CERT_JSON | jq -r .data.certificate > /tmp/doc.crt
-echo $CERT_JSON | jq -r .data.private_key > /tmp/doc.key
-echo $CERT_JSON | jq -r .data.issuing_ca  > /tmp/ca.crt
+echo "$CERT_JSON" | jq -r .data.certificate > "$TMP_DIR/doc.crt"
+echo "$CERT_JSON" | jq -r .data.private_key > "$TMP_DIR/doc.key"
+echo "$CERT_JSON" | jq -r .data.issuing_ca  > "$TMP_DIR/ca.crt"
 echo '[OK] Cert issued từ Internal CA'
  
 echo '=== TEST 2: mTLS call với cert hợp lệ → phải PASS ==='
-curl --cert /tmp/doc.crt --key /tmp/doc.key --cacert /tmp/ca.crt \
+curl --cert "$TMP_DIR/doc.crt" --key "$TMP_DIR/doc.key" --cacert "$TMP_DIR/ca.crt" \
   http://$VAULT_VM:8200/v1/sys/health | jq .initialized
 # Kết quả: true
  

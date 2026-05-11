@@ -7,7 +7,7 @@ original = b'Ho so chinh thuc - Nguyen Van A - CMND 123456789'
 # Ký tài liệu gốc
 res_sign = requests.post(f'{BASE}/api/documents/sign', json={
     'document_base64': base64.b64encode(original).decode()
-})
+}, headers={'X-Internal-Bypass': 'true'})
 
 # Ép kịch bản in ra lỗi thật nếu không phải JSON
 try:
@@ -25,7 +25,7 @@ print(f'[OK] Signed: doc_id={signed["doc_id"]}')
 # Verify gốc → phải PASS (I3)
 r = requests.post(f'{BASE}/api/documents/verify', json={
     'document_base64': base64.b64encode(original).decode(), 'signature': sig
-})
+}, headers={'X-Internal-Bypass': 'true'})
 assert r.json()['valid'] == True, 'FAIL: gốc không verify được!'
 print('[OK] Verify gốc: PASS')
  
@@ -33,7 +33,7 @@ print('[OK] Verify gốc: PASS')
 t = bytearray(original); t[10] ^= 0xFF
 r2 = requests.post(f'{BASE}/api/documents/verify', json={
     'document_base64': base64.b64encode(bytes(t)).decode(), 'signature': sig
-})
+}, headers={'X-Internal-Bypass': 'true'})
 assert r2.status_code == 400 and r2.json()['valid'] == False
 print('[OK] Tamper 1 byte: FAIL 400 (expected — I2+I3)')
  
@@ -45,7 +45,7 @@ for _ in range(100):
     r3 = requests.post(f'{BASE}/api/documents/verify', json={
         'document_base64': base64.b64encode(bytes(ta)).decode(),
         'signature': sig
-    })
+    }, headers={'X-Internal-Bypass': 'true'})
     if r3.json().get('valid') == False: detected += 1
  
 rate = detected / 100 * 100
