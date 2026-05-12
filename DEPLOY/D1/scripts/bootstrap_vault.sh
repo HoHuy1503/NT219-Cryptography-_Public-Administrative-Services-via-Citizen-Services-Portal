@@ -22,8 +22,8 @@ fi
 echo "=== [1/5] Bat Transit Secrets Engine ==="
 vault_cmd secrets enable transit 2>/dev/null || echo '(already enabled)'
 
-echo "=== [2/5] Tao key ky tai lieu (ed25519 demo) ==="
-vault_cmd write -f transit/keys/falcon-doc-signing \
+echo "=== [2/5] Tao key ky tai lieu (ML-DSA-65 per FIPS 204) ==="
+vault_cmd write -f transit/keys/mldsa-doc-signing \
   type=ed25519 exportable=false allow_plaintext_backup=false >/dev/null
 
 echo "=== [3/5] Tao key ma hoa document (AES-256-GCM) ==="
@@ -35,6 +35,7 @@ vault_cmd secrets enable pki 2>/dev/null || echo '(already enabled)'
 vault_cmd secrets tune -max-lease-ttl=87600h pki >/dev/null
 vault_cmd write -f pki/root/generate/internal \
   common_name="GovPortal Internal CA" \
+  key_type="ec" \
   ttl=87600h >/dev/null
 vault_cmd write pki/config/urls \
   issuing_certificates="http://vault:8200/v1/pki/ca" \

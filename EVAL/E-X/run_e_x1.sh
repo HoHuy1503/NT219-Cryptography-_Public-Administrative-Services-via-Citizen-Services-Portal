@@ -12,13 +12,13 @@ vault_cmd() {
 	fi
 }
  
-OLD=$(vault_cmd read -field=latest_version transit/keys/falcon-doc-signing)
+OLD=$(vault_cmd read -field=latest_version transit/keys/mldsa-doc-signing)
 echo "Phiên bản hiện tại: $OLD"
 START=$(date +%s)
  
-vault_cmd write -f transit/keys/falcon-doc-signing/rotate
+vault_cmd write -f transit/keys/mldsa-doc-signing/rotate
  
-NEW=$(vault_cmd read -field=latest_version transit/keys/falcon-doc-signing)
+NEW=$(vault_cmd read -field=latest_version transit/keys/mldsa-doc-signing)
 END=$(date +%s)
 ELAPSED=$((END-START))
  
@@ -28,7 +28,7 @@ echo "E-X1: $STATUS (I6)"
  
 # Kiểm tra key cũ vẫn dùng decrypt được (không break backward compat)
 echo 'Key cũ vẫn available cho decrypt: '
-vault_cmd read -field=min_decryption_version transit/keys/falcon-doc-signing
+vault_cmd read -field=min_decryption_version transit/keys/mldsa-doc-signing
  
 cat > EVAL/E-X/E-X1-result.json << EOF
 {"eval_id":"E-X1","invariant":"I6",

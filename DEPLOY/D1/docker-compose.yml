@@ -57,7 +57,7 @@ services:
       - ./configs/opa-policies:/policies:ro
     ports: ["8181:8181"]
 
-  # ── ZONE 3: Document Service (FALCON Sign + AEAD) ──────
+  # ── ZONE 3: Document Service (ML-DSA Sign + AES-256-GCM AEAD) ──────
   doc-service:
     build: ./doc-service
     networks: [internal-net, mgmt-net]

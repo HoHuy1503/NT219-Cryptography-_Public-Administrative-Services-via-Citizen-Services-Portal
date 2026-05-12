@@ -14,8 +14,8 @@ ssh_vm() {
 }
 
 echo '=== TEST 1: Xin cert từ Vault CA ==='
-VAULT_TOKEN=$(ssh_vm mgmt 'sudo jq -r .root_token /root/vault-init.json' | tail -n1)
-ssh_vm mgmt "sudo bash -lc 'set -euo pipefail; CERT_JSON=\$(curl -s -X POST http://127.0.0.1:8200/v1/pki/issue/service-cert -H \"X-Vault-Token: $VAULT_TOKEN\" -d \"{\\\"common_name\\\":\\\"doc-service.govportal.internal\\\"}\"); curl --cert <(echo \"\$CERT_JSON\" | jq -r .data.certificate) --key <(echo \"\$CERT_JSON\" | jq -r .data.private_key) --cacert <(echo \"\$CERT_JSON\" | jq -r .data.issuing_ca) http://127.0.0.1:8200/v1/sys/health | jq .initialized'"
+VAULT_TOKEN=$(ssh_vm mgmt 'sudo jq -r .root_token /root/vault-init.json' | tr -d '\r' | tail -n1)
+ssh_vm mgmt "sudo bash -lc 'set -euo pipefail; CERT_JSON=\$(curl -sS -X POST http://127.0.0.1:8200/v1/pki/issue/service-cert -H \"X-Vault-Token: $VAULT_TOKEN\" -d \"{\\\"common_name\\\":\\\"doc-service.govportal.internal\\\",\\\"ttl\\\":\\\"24h\\\"}\"); echo \"\$CERT_JSON\" | jq -e \".data and .data.certificate and .data.private_key and .data.issuing_ca\" >/dev/null; curl -sS http://127.0.0.1:8200/v1/sys/health | jq -e \".initialized == true\" >/dev/null'"
 echo '[OK] Cert issued từ Internal CA'
 
 echo '=== TEST 2: mTLS call với cert hợp lệ → phải PASS ==='
