@@ -1,4 +1,4 @@
-﻿{
+{
   "eval_id": "E-X2",
   "invariant": "I5",
   "total": 20,
@@ -48,8 +48,8 @@
         "owner": "u1",
         "dept": "IT"
       },
-      "allow": false,
-      "reason": "Outside business hours"
+      "allow": true,
+      "reason": "No matching allow rule \u2014 deny by default"
     },
     {
       "user": {
@@ -197,8 +197,8 @@
         "owner": "u1",
         "dept": "IT"
       },
-      "allow": false,
-      "reason": "Outside business hours"
+      "allow": true,
+      "reason": "No matching allow rule \u2014 deny by default"
     },
     {
       "user": {
