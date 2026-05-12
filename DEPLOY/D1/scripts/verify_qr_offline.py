@@ -1,61 +1,73 @@
 #!/usr/bin/env python3
-"""Offline QR payload verifier for D1 demo.
-
-The qr-service payload is Fernet-encrypted. Provide the same Fernet key used by
-qr-service via --key or QR_FERNET_KEY environment variable.
-"""
-
-import argparse
-import base64
 import json
 import os
 import sys
 import time
+from pathlib import Path
 
-from cryptography.fernet import Fernet, InvalidToken
-
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify encrypted QR payload offline")
-    parser.add_argument("--qr", required=True, help="QR payload string (base64url of Fernet token)")
-    parser.add_argument(
-        "--key",
-        default=os.environ.get("QR_FERNET_KEY", ""),
-        help="Fernet key used by qr-service (or set QR_FERNET_KEY)",
-    )
-    args = parser.parse_args()
 
-    if not args.key:
-        print("[ERROR] Missing Fernet key. Use --key or QR_FERNET_KEY.")
+    script_dir = Path(__file__).parent.absolute()
+
+    base_dir = script_dir.parent
+
+    key_file_path = base_dir / "key" / "key.bin"
+    qr_file_path = base_dir / "qr_encoded" / "qr_code.enc"
+
+    if not key_file_path.exists():
+        print(f"[ERROR] Không tìm thấy file key: {key_file_path}")
+        return 2
+    if not qr_file_path.exists():
+        print(f"[ERROR] Không tìm thấy file mã hóa: {qr_file_path}")
         return 2
 
     try:
-        fernet = Fernet(args.key.encode())
-    except Exception:
-        print("[ERROR] Invalid Fernet key format.")
-        return 2
 
-    try:
-        encrypted = base64.urlsafe_b64decode(args.qr.encode())
-        payload = json.loads(fernet.decrypt(encrypted).decode())
-    except (InvalidToken, ValueError, json.JSONDecodeError):
-        print("[INVALID] QR payload cannot be decrypted/parsed.")
+        with open(key_file_path, "rb") as f:
+            raw_key_data = f.read()
+
+        iv = raw_key_data[-16:]
+        key = raw_key_data[:-16]
+
+        with open(qr_file_path, "rb") as f:
+            encrypted_data = f.read()
+
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        decrypted_raw = cipher.decrypt(encrypted_data)
+        decrypted_text = unpad(decrypted_raw, AES.block_size).decode('utf-8')
+        
+        payload = json.loads(decrypted_text)
+
+        now = time.time()
+        exp = float(payload.get("exp", 0))
+        expired = now > exp
+
+        result = {
+            "status": "SUCCESS",
+            "valid": not expired,
+            "expired": expired,
+            "user_id": payload.get("user_id"),
+            "iat": payload.get("iat"),
+            "exp": exp,
+            "details": {
+                "key_used": key_file_path.name,
+                "file_decrypted": qr_file_path.name,
+                "key_length": len(key)
+            }
+        }
+        
+        print(json.dumps(result, ensure_ascii=True, indent=2))
+        return 0 if not expired else 1
+
+    except Exception as e:
+        print(json.dumps({
+            "status": "ERROR",
+            "message": f"Không thể verify. Lỗi: {str(e)}"
+        }, indent=2))
         return 1
-
-    now = time.time()
-    expired = now > float(payload.get("exp", 0))
-
-    result = {
-        "valid": not expired,
-        "expired": expired,
-        "user_id": payload.get("user_id"),
-        "nonce": payload.get("nonce"),
-        "iat": payload.get("iat"),
-        "exp": payload.get("exp"),
-    }
-    print(json.dumps(result, ensure_ascii=True, indent=2))
-    return 0 if not expired else 1
-
 
 if __name__ == "__main__":
     sys.exit(main())
