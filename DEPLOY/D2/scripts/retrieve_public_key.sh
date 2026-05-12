@@ -68,3 +68,30 @@ cat "$OUTPUT_DIR/govportal_public_key.pem"
 echo ""
 echo "=== KEY FINGERPRINT ==="
 openssl x509 -in "$OUTPUT_DIR/govportal_ca.pem" -noout -fingerprint -sha256
+
+echo ""
+echo "=== KEY STORAGE MAP ==="
+echo "- Vault file storage (Mgmt VM): /opt/vault/data/"
+echo "- Vault init (root token + unseal keys): /root/vault-init.json (Mgmt VM, root-only)"
+echo "- Vault Transit keys (logical): transit/keys/mldsa-doc-signing, transit/keys/doc-encryption"
+echo "- Vault PKI engine: pki/ (issuing CA available at pki/cert/ca)"
+echo "- Vagrant SSH private keys (host workspace): DEPLOY/D2/.vagrant/machines/*/virtualbox/private_key"
+echo "- Keycloak realm + secrets: Postgres DB (container volume: postgres-data)"
+
+if [ -n "$VAULT_TOKEN" ]; then
+  echo ""
+  echo "=== VAULT: Transit keys (via API) ==="
+  curl -sS -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/transit/keys?list=true" \
+    | jq -r '.data.keys[]? // "(no transit keys or insufficient perms)"' 2>/dev/null || echo "Could not list transit keys (insufficient permissions or Vault unreachable)"
+
+  echo ""
+  echo "=== VAULT: mldsa-doc-signing metadata ==="
+  curl -sS -H "X-Vault-Token: $VAULT_TOKEN" "$VAULT_ADDR/v1/transit/keys/mldsa-doc-signing" 2>/dev/null | jq '.' || echo "No metadata or insufficient permissions for mldsa-doc-signing"
+else
+  echo ""
+  echo "Note: to query Vault runtime metadata (transit keys), set VAULT_TOKEN in the environment and re-run with --from-vault."
+fi
+
+echo ""
+echo "=== LOCAL: Vagrant private keys (if present in workspace) ==="
+ls -lh "$SCRIPT_DIR/../.vagrant/machines"/*/virtualbox/private_key 2>/dev/null || echo "No Vagrant private keys found in workspace .vagrant directory"

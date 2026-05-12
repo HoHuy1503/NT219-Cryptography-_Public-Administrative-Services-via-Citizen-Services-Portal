@@ -100,6 +100,17 @@
     vault read transit/keys/mldsa-doc-signing >/dev/null 2>&1 || vault write -f transit/keys/mldsa-doc-signing type=ed25519 >/dev/null
     vault read transit/keys/doc-encryption >/dev/null 2>&1 || vault write -f transit/keys/doc-encryption type=aes256-gcm96 >/dev/null
 
+    for key_name in $(vault list -format=json transit/keys | jq -r '.[]'); do
+      case "$key_name" in
+        mldsa-doc-signing|doc-encryption)
+          ;;
+        *)
+          vault write "transit/keys/$key_name/config" deletion_allowed=true >/dev/null 2>&1 || true
+          vault delete "transit/keys/$key_name" >/dev/null 2>&1 || true
+          ;;
+      esac
+    done
+
     vault secrets list -format=json | jq -e 'has("pki/")' >/dev/null || vault secrets enable pki
     vault secrets tune -max-lease-ttl=87600h pki
     # Generate an EC CA instead of the RSA default
