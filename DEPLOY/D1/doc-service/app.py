@@ -74,11 +74,12 @@ def sign_document():
     doc_bytes = base64.b64decode(doc_b64)
     doc_hash = hashlib.sha256(doc_bytes).hexdigest()
  
-    # Bước 1: Ký qua Vault Transit — key KHÔNG rời Vault
+    # Bước 1: Ký qua Vault Transit (ML-DSA-65 per FIPS 204) — key KHONG roi Vault
     try:
-        sig_resp = vc.write(
-            path="transit/sign/falcon-doc-signing",
-            input=doc_b64
+        sig_resp = vc.secrets.transit.sign_data(
+            name="mldsa-doc-signing",
+            hash_input=doc_b64,
+            hash_algorithm="sha2-256"
         )
         signature = sig_resp["data"]["signature"]
     except Exception as exc:
@@ -122,12 +123,13 @@ def verify_document():
     doc_bytes = base64.b64decode(doc_b64)
     doc_hash = hashlib.sha256(doc_bytes).hexdigest()
  
-    # Verify signature qua Vault Transit
+    # Verify signature qua Vault Transit (ML-DSA-65 per FIPS 204)
     try:
-        verify_resp = vc.write(
-            path="transit/verify/falcon-doc-signing",
-            input=doc_b64,
-            signature=data["signature"]
+        verify_resp = vc.secrets.transit.verify_signed_data(
+            name="mldsa-doc-signing",
+            hash_input=doc_b64,
+            signature=data["signature"],
+            hash_algorithm="sha2-256"
         )
         valid = bool(verify_resp["data"]["valid"])
     except Exception as exc:
