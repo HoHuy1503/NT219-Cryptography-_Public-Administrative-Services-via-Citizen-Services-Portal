@@ -1,4 +1,4 @@
-- name: Ensure Keycloak seed directory exists
+﻿- name: Ensure Keycloak seed directory exists
   file:
     path: /opt/govportal/keycloak
     state: directory

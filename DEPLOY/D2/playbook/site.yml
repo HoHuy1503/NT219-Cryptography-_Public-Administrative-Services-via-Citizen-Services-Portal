@@ -1,4 +1,4 @@
-- name: Setup VM-Mgmt — Vault KMS + Internal CA
+﻿- name: Setup VM-Mgmt — Vault KMS + Internal CA
   hosts: mgmt
   become: yes
   roles:

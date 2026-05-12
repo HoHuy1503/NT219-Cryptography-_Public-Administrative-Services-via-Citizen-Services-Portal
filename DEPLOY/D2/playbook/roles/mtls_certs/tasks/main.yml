@@ -1,4 +1,4 @@
-- name: Ensure OpenSSL is installed
+﻿- name: Ensure OpenSSL is installed
   apt:
     name: openssl
     state: present

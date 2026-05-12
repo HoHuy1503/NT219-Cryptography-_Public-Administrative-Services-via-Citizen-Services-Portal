@@ -1,4 +1,4 @@
-- name: Ensure doc-service source directory exists
+﻿- name: Ensure doc-service source directory exists
   file:
     path: /opt/govportal/doc-service
     state: directory

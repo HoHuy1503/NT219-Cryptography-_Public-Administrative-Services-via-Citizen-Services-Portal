@@ -1,4 +1,4 @@
-# CRYPTO_SOLUTION.md — Giai Phap Mat Ma 3 Lop
+﻿# CRYPTO_SOLUTION.md — Giai Phap Mat Ma 3 Lop
 
 ## Lop 1 — CRYPTO: Bao ve du lieu
 

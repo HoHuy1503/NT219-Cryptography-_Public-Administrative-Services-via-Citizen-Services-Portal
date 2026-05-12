@@ -1,4 +1,4 @@
-{
+﻿{
   "eval_id": "E-C1", "invariant": "I1",
   "requests": 1000, "plaintext_found": 0,
   "status": "PASS", "threshold": "0 byte",

@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # EVAL/E-C/run_e_c1.sh
 echo '=== E-C1: Plaintext Leakage Test (I1) ==='
  

@@ -1,4 +1,4 @@
-# DEPLOY/D1/qr-service/app.py
+﻿# DEPLOY/D1/qr-service/app.py
 import redis, json, uuid, time, base64, os, logging
 from flask import Flask, request, jsonify
 from cryptography.fernet import Fernet

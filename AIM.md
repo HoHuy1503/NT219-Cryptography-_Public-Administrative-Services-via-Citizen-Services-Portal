@@ -1,4 +1,4 @@
-# AIM.md — Asset Inventory & Model
+﻿# AIM.md — Asset Inventory & Model
 # NT219 Topic 11: Cổng Dịch Vụ Hành Chính Công
  
 ## A1 — Dữ liệu (Data Assets)

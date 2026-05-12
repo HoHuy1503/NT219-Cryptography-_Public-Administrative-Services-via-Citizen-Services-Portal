@@ -1,4 +1,4 @@
-version: "3.9"
+﻿version: "3.9"
 networks:
   dmz-net:       # Zone 2: API Gateway ↔ Internet
   internal-net:  # Zone 3: Services nội bộ

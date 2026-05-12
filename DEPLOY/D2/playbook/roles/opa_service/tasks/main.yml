@@ -1,4 +1,4 @@
-- name: Ensure OPA policy directory exists
+﻿- name: Ensure OPA policy directory exists
   file:
     path: /opt/govportal/opa
     state: directory

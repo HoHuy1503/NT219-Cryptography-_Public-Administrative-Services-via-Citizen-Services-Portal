@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # EVAL/E-X/run_e_x1.sh
 export VAULT_ADDR='http://localhost:8200'
 export VAULT_TOKEN="${VAULT_DEV_TOKEN:-dev-root-token-govportal}"

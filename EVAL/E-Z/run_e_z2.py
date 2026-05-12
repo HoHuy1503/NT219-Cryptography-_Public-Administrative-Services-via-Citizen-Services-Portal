@@ -1,4 +1,4 @@
-import requests, json, base64
+﻿import requests, json, base64
 GW = 'http://localhost:5000'
 results = []
  

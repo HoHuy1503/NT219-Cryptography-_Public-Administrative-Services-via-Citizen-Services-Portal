@@ -1,4 +1,4 @@
-- name: Run Redis container
+﻿- name: Run Redis container
   shell: |
     set -e
     docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net

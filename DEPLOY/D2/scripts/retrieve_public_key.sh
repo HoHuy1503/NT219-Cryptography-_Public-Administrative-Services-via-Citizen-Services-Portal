@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # Script to retrieve GovPortal CA public key from Vault PKMS or local certificate
 # Usage: ./retrieve_public_key.sh [--from-vault|--local] [output-dir]
 

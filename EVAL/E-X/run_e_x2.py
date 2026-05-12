@@ -1,4 +1,4 @@
-import requests, json
+﻿import requests, json
  
 OPA = 'http://localhost:8181/v1/data/govportal/authz'
  
