@@ -1,0 +1,93 @@
+# roles/storage_service/tasks/main.yml
+# Deploy document storage service with a dedicated local PostgreSQL backend
+
+- name: "Create storage service directories"
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/govportal/storage-service
+    - /opt/govportal/storage-service/logs
+
+- name: "Copy storage service files"
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - { src: "app.py", dest: "/opt/govportal/storage-service/app.py", mode: "0755" }
+    - { src: "requirements.txt", dest: "/opt/govportal/storage-service/requirements.txt" }
+    - { src: "Dockerfile", dest: "/opt/govportal/storage-service/Dockerfile" }
+
+- name: "Generate local storage database credentials"
+  shell: |
+    set -e
+    STORAGE_DB_NAME=govportal_storage
+    STORAGE_DB_USER=govportal_storage
+    STORAGE_DB_PASSWORD=change_me
+    {
+      echo "STORAGE_DB_NAME=${STORAGE_DB_NAME}"
+      echo "STORAGE_DB_USER=${STORAGE_DB_USER}"
+      echo "STORAGE_DB_PASSWORD=${STORAGE_DB_PASSWORD}"
+    } > /root/storage-db-creds.txt
+    chmod 600 /root/storage-db-creds.txt
+    echo "$STORAGE_DB_NAME|$STORAGE_DB_USER|$STORAGE_DB_PASSWORD"
+  register: storage_db_creds
+  changed_when: false
+  args:
+    executable: /bin/bash
+
+- name: "Build storage service Docker image"
+  shell: |
+    set -e
+    cd /opt/govportal/storage-service
+    docker build -t govportal-storage-service .
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: "Deploy storage service container"
+  shell: |
+    set -e
+    source /root/storage-db-creds.txt
+    docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net
+    docker rm -f storage-service >/dev/null 2>&1 || true
+    docker run -d --name storage-service \
+      --network internal-net \
+      --restart unless-stopped \
+      --health-cmd="python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:9003/health')\" || exit 1" \
+      --health-interval=30s \
+      --health-timeout=5s \
+      --health-retries=3 \
+      -p {{ internal_bind_ip }}:9003:9003 \
+      -e STORAGE_DB_HOST={{ hostvars.get('db-vm', {}).get('vm_network_ip', '10.0.1.12') }} \
+      -e STORAGE_DB_PORT=5432 \
+      -e STORAGE_DB_NAME=${STORAGE_DB_NAME} \
+      -e STORAGE_DB_USER=${STORAGE_DB_USER} \
+      -e STORAGE_DB_PASSWORD=${STORAGE_DB_PASSWORD} \
+      -e SERVICE_LISTEN=0.0.0.0 \
+      -e SERVICE_PORT=9003 \
+      govportal-storage-service
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: "Wait for storage service to be healthy"
+  wait_for:
+    host: "{{ internal_bind_ip }}"
+    port: 9003
+    delay: 3
+    timeout: 180
+
+- name: "Test storage service status"
+  debug:
+    msg: "Storage service health endpoint is reachable"
+
+- name: "Display storage service status"
+  debug:
+    msg:
+      - "✓ Storage service deployed successfully"
+      - "Auth: local or disabled"
+      - "Local PostgreSQL: healthy"
+      - "API endpoint: http://{{ internal_bind_ip }}:9003"

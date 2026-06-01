@@ -1,15 +1,4 @@
-﻿- name: Configure PKI URLs in Vault
-  shell: |
-    set -e
-    export VAULT_ADDR=http://127.0.0.1:8200
-    if [ -f /root/vault-init.json ]; then
-      export VAULT_TOKEN=$(jq -r .root_token /root/vault-init.json)
-      vault write pki/config/urls \
-        issuing_certificates="http://10.0.3.10:8200/v1/pki/ca" \
-        crl_distribution_points="http://10.0.3.10:8200/v1/pki/crl"
-    else
-      echo "vault-init.json not found, skip PKI URL config"
-    fi
-  args:
-    executable: /bin/bash
-  changed_when: true
+﻿- name: Vault not present; skip PKI URL configuration
+  debug:
+    msg: "Vault is not configured for this deployment; skipping PKI URL config"
+  changed_when: false

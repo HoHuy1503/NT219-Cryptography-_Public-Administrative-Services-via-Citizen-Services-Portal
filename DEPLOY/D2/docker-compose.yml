@@ -1,0 +1,95 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: docdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  doc_service:
+    build:
+      context: .
+      dockerfile: docker/doc_service/Dockerfile
+    volumes:
+      - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
+      - ./state:/state
+    environment:
+      - OPENSSL_DIR=/opt/openssl
+      - OPENSSL_BIN=/opt/openssl/apps/openssl
+      - OPENSSL_LIB_DIR=/opt/openssl
+      - OPENSSL_MODULES=/opt/openssl/providers
+      - OPENSSL_CONF=/opt/openssl/apps/openssl.cnf
+      - LD_LIBRARY_PATH=/opt/openssl
+      - PATH=/opt/openssl/apps:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/docdb
+      - DOC_STATE_DIR=/state
+      - STORAGE_SERVICE_URL=http://storage_service:9003
+    networks:
+      - internal
+
+  storage_service:
+    build:
+      context: .
+      dockerfile: docker/storage_service/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/docdb
+      - LOCAL_MODE=true
+    networks:
+      - internal
+
+  qr_service:
+    build:
+      context: .
+      dockerfile: docker/qr_service/Dockerfile
+    environment:
+      - QR_TTL=300
+    networks:
+      - internal
+
+  portals:
+    image: python:3.11-slim
+    working_dir: /app/portals
+    volumes:
+      - ./portals:/app/portals:ro
+      - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
+    command: ["python3", "start_portals.py"]
+    environment:
+      - OPENSSL_BIN=/opt/openssl/apps/openssl
+      - OPENSSL_LIB_DIR=/opt/openssl
+      - OPENSSL_MODULES=/opt/openssl/providers
+      - OPENSSL_CONF=/opt/openssl/apps/openssl.cnf
+      - LD_LIBRARY_PATH=/opt/openssl
+    depends_on:
+      - gateway
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+      - "3003:3003"
+      - "3004:3004"
+    networks:
+      - public
+
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/gateway/Dockerfile
+    ports:
+      - "8080:80"
+    networks:
+      - internal
+      - public
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    driver: bridge
+  public:
+    driver: bridge

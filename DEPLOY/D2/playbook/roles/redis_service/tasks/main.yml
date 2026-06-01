@@ -1,9 +1,49 @@
-﻿- name: Run Redis container
+﻿- name: Generate Redis password (if not exists)
+  shell: |
+    if [ -f /root/redis-pass.txt ]; then
+      cat /root/redis-pass.txt
+    else
+      export LD_LIBRARY_PATH=/opt/openssl/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+      REDIS_PASS=$(/opt/openssl/bin/openssl rand -base64 32)
+      echo "$REDIS_PASS" > /root/redis-pass.txt
+      chmod 600 /root/redis-pass.txt
+      echo "$REDIS_PASS"
+    fi
+  register: redis_pass_result
+  changed_when: false
+  args:
+    executable: /bin/bash
+
+- name: Ensure Redis OpenSSL bundle directories exist
+  file:
+    path: /opt/openssl/providers
+    state: directory
+    mode: '0755'
+
+- name: Run Redis container with authentication and ACL
   shell: |
     set -e
+    REDIS_PASS=$(cat /root/redis-pass.txt)
+    mkdir -p /opt/redis
+    cat > /opt/redis/users.acl <<EOF
+    user default on >${REDIS_PASS} ~* +@all
+    EOF
+    
     docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net
     docker rm -f redis >/dev/null 2>&1 || true
-    docker run -d --name redis --network internal-net redis:7.2
+    
+    # Run Redis with password authentication and ACL
+    docker run -d --name redis \
+      --network internal-net \
+      --restart unless-stopped \
+      -p {{ internal_bind_ip }}:6379:6379 \
+      --health-cmd="redis-cli -a ${REDIS_PASS} ping || exit 1" \
+      --health-interval=10s \
+      --health-timeout=5s \
+      --health-retries=3 \
+      -v /opt/redis/users.acl:/usr/local/etc/redis/users.acl:ro \
+      redis:7.2 \
+      redis-server --aclfile /usr/local/etc/redis/users.acl --appendonly yes
   args:
     executable: /bin/bash
   changed_when: true

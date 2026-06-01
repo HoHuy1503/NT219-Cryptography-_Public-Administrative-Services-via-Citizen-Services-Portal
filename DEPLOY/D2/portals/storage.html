@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cổng Quản Trị Lưu Trữ</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header { background: linear-gradient(135deg, #00838f 0%, #00695c 100%); color: white; padding: 30px; margin-bottom: 30px; border-radius: 8px; }
+    header h1 { font-size: 2em; margin-bottom: 10px; }
+    header p { opacity: 0.9; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .card h2 { color: #00695c; margin-bottom: 15px; }
+    button { background: #00838f; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1em; }
+    button:hover { background: #00695c; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
+    input[type="text"], textarea, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em; }
+    textarea { resize: vertical; min-height: 100px; }
+    .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+    .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+    nav { background: #333; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+    nav a { color: white; text-decoration: none; margin-right: 20px; }
+    nav a:hover { color: #00838f; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+    th { background: #f5f5f5; font-weight: bold; }
+    tr:hover { background: #f9f9f9; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+    .stat-box { background: #f0f0f0; padding: 15px; border-radius: 4px; text-align: center; }
+    .stat-box h3 { font-size: 2em; color: #00695c; }
+    .stat-box p { color: #666; margin-top: 5px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>💾 Cổng Quản Trị Lưu Trữ</h1>
+      <p>Quản lý tài liệu, tài khoản, và nhật ký kiểm toán</p>
+    </header>
+
+    <nav>
+      <a href="#dashboard" onclick="showSection('dashboard')">Trang Chủ</a>
+      <a href="#documents" onclick="showSection('documents')">Tài Liệu</a>
+      <a href="#users" onclick="showSection('users')">Người Dùng</a>
+      <a href="#citizens" onclick="showSection('citizens')">Công Dân</a>
+      <a href="#thirdparty" onclick="showSection('thirdparty')">Bên Thứ Ba</a>
+      <a id="nav-login" href="#login" onclick="showSection('login')">Đăng Nhập</a>
+      <a id="nav-logout" href="#" onclick="storageLogout()" style="display:none; margin-left:10px;">Đăng Xuất</a>
+    </nav>
+
+    <!-- Dashboard -->
+    <div id="dashboard" class="section">
+      <div class="stats">
+        <div class="stat-box">
+          <h3 id="doc-count">0</h3>
+          <p>Tài Liệu</p>
+        </div>
+        <div class="stat-box">
+          <h3 id="user-count">0</h3>
+          <p>Người Dùng</p>
+        </div>
+        <div class="stat-box">
+          <h3 id="qr-count">0</h3>
+          <p>QR Đã Quét</p>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <h2>📄 Tài Liệu</h2>
+          <button onclick="showSection('documents')">Quản Lý →</button>
+        </div>
+        <div class="card">
+          <h2>👥 Người Dùng</h2>
+          <button onclick="showSection('users')">Quản Lý →</button>
+        </div>
+        <div class="card">
+          <h2>🧑 Công Dân</h2>
+          <button onclick="showSection('citizens')">Quản Lý →</button>
+        </div>
+        <div class="card">
+          <h2>🏢 Bên Thứ Ba</h2>
+          <button onclick="showSection('thirdparty')">Quản Lý →</button>
+        </div>
+        <div class="card">
+          <h2>📋 Kiểm Toán</h2>
+          <button onclick="showSection('dashboard')">Xem →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Documents -->
+    <div id="documents" class="section" style="display:none;">
+      <div class="card">
+        <h2>📄 Danh Sách QR Tài Liệu</h2>
+        <div class="form-group">
+          <label>Lọc theo loại:</label>
+          <select id="doc-type-filter">
+            <option value="">Tất cả</option>
+            <option>certificate</option>
+            <option>permit</option>
+            <option>license</option>
+          </select>
+        </div>
+        <button onclick="loadDocuments()">Tải Danh Sách</button>
+        <div id="documents-list" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+
+    <!-- Users -->
+    <div id="users" class="section" style="display:none;">
+      <div class="card">
+        <h2>👥 Danh Sách Người Dùng</h2>
+        <button onclick="loadUsers()">Tải Danh Sách</button>
+        <div id="users-list" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+
+    <div id="citizens" class="section" style="display:none;">
+      <div class="card">
+        <h2>🧑 Danh Sách Công Dân</h2>
+        <button onclick="loadCitizens()">Tải Danh Sách</button>
+        <div id="citizens-list" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+
+    <div id="thirdparty" class="section" style="display:none;">
+      <div class="card">
+        <h2>🏢 Danh Sách Bên Thứ Ba</h2>
+        <button onclick="loadThirdParties()">Tải Danh Sách</button>
+        <div id="thirdparty-list" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+
+    <!-- Audit Log removed -->
+
+    <!-- Login Section -->
+    <div id="login" class="section" style="display:none;">
+      <div class="card">
+        <h2>🔐 Đăng Nhập</h2>
+        <div class="form-group">
+          <label>ID Người Dùng:</label>
+          <input type="text" id="username" placeholder="storage_admin_001">
+        </div>
+        <div class="form-group">
+          <label>Mật Khẩu:</label>
+          <input type="password" id="password" placeholder="Mật khẩu">
+        </div>
+        <button onclick="login()">Đăng Nhập</button>
+        <div id="login-result" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:8080';
+
+    function showSection(section) {
+      document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
+      if (section === 'dashboard') {
+        document.getElementById('dashboard').style.display = 'block';
+        loadDashboardStats();
+      } else if (section === 'documents') document.getElementById('documents').style.display = 'block';
+      else if (section === 'users') document.getElementById('users').style.display = 'block';
+      else if (section === 'citizens') document.getElementById('citizens').style.display = 'block';
+      else if (section === 'thirdparty') document.getElementById('thirdparty').style.display = 'block';
+      else if (section === 'login') document.getElementById('login').style.display = 'block';
+    }
+
+    async function loadDashboardStats() {
+      try {
+        const token = localStorage.getItem('sessionId');
+
+        // QR count (public)
+        const docsResp = await fetch(`${API_URL}/api/storage/document-qr?limit=1`);
+        const docsData = await docsResp.json();
+        const qrCount = docsData.qrs?.length || 0;
+        document.getElementById('qr-count').textContent = qrCount;
+
+        // User count (use public officers endpoint)
+        let userCount = 0;
+        try {
+          const usersResp = await fetch(`${API_URL}/api/storage/officers?limit=1`);
+          const usersData = await usersResp.json();
+          userCount = (usersData.officers && usersData.officers.length) ? usersData.officers.length : 0;
+        } catch (e) {
+          console.warn('Could not fetch user count', e);
+        }
+        document.getElementById('user-count').textContent = userCount;
+
+        // Document count (requires auth). If admin logged in, fetch one document to infer non-zero.
+        let docCount = 0;
+        if (token) {
+          try {
+            const docsAuthResp = await fetch(`${API_URL}/api/storage/documents?limit=1`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const docsAuthData = await docsAuthResp.json();
+            docCount = (docsAuthData.documents && docsAuthData.documents.length) ? docsAuthData.documents.length : 0;
+          } catch (e) {
+            console.warn('Could not fetch documents count', e);
+          }
+        }
+        document.getElementById('doc-count').textContent = docCount;
+
+        // Hide stat boxes that are zero
+        document.querySelectorAll('.stat-box').forEach((box, idx) => {
+          const counts = [docCount, userCount, qrCount];
+          box.style.display = (counts[idx] === 0) ? 'none' : 'block';
+        });
+      } catch (e) {
+        console.error('Error loading stats:', e);
+      }
+    }
+
+    async function loadDocuments() {
+      try {
+        const type = document.getElementById('doc-type-filter').value;
+        const url = type ? `${API_URL}/api/storage/document-qr?document_type=${type}` : `${API_URL}/api/storage/document-qr`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        let html = '<table><tr><th>QR ID</th><th>Tài Liệu</th><th>Loại</th><th>Tạo Lúc</th><th>Lần Truy Cập</th></tr>';
+        data.qrs?.forEach(qr => {
+          html += `<tr><td>${qr.qr_id?.substring(0, 8)}...</td><td>${qr.document_id}</td><td>${qr.document_type}</td><td>${new Date(qr.created_at).toLocaleString('vi-VN')}</td><td>${qr.accessed_count || 0}</td></tr>`;
+        });
+        html += '</table>';
+        document.getElementById('documents-list').innerHTML = html || '<p>Không có dữ liệu</p>';
+      } catch (e) {
+        document.getElementById('documents-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function loadUsers() {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/officers`);
+        const data = await response.json();
+
+        let html = '<table><tr><th>Hành Động</th><th>Officer ID</th><th>Email</th><th>Phòng Ban</th><th>Tạo Lúc</th></tr>';
+        data.officers?.forEach(officer => {
+          html += `<tr><td><button onclick="deleteOfficer('${officer.officer_id}')" style="background:#c62828;">Xóa</button></td><td>${officer.officer_id}</td><td>${officer.email || 'N/A'}</td><td>${officer.department || 'N/A'}</td><td>${new Date(officer.created_at).toLocaleString('vi-VN')}</td></tr>`;
+        });
+        html += '</table>';
+        document.getElementById('users-list').innerHTML = html || '<p>Không có dữ liệu</p>';
+      } catch (e) {
+        document.getElementById('users-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function loadCitizens() {
+      try {
+        const token = localStorage.getItem('sessionId');
+        const response = await fetch(`${API_URL}/api/storage/citizens`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const data = await response.json();
+
+        let html = '<table><tr><th>Hành Động</th><th>Citizen ID</th><th>Email</th><th>Tên</th><th>Vùng</th><th>Đã Xác Minh</th><th>Tạo Lúc</th></tr>';
+        data.citizens?.forEach(citizen => {
+          html += `<tr><td><button onclick="deleteCitizen('${citizen.citizen_id}')" style="background:#c62828;">Xóa</button></td><td>${citizen.citizen_id}</td><td>${citizen.email || 'N/A'}</td><td>${citizen.name || 'N/A'}</td><td>${citizen.region_code || 'N/A'}</td><td>${citizen.verified ? 'Có' : 'Không'}</td><td>${citizen.created_at ? new Date(citizen.created_at).toLocaleString('vi-VN') : 'N/A'}</td></tr>`;
+        });
+        html += '</table>';
+        document.getElementById('citizens-list').innerHTML = html || '<p>Không có dữ liệu</p>';
+      } catch (e) {
+        document.getElementById('citizens-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function deleteCitizen(citizenId) {
+      if (!confirm(`Xác nhận xóa công dân "${citizenId}"?`)) return;
+      try {
+        const token = localStorage.getItem('sessionId') || '';
+        const resp = await fetch(`${API_URL}/api/storage/citizens/${citizenId}`, {
+          method: 'DELETE',
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok) {
+          alert(`✓ Công dân ${citizenId} đã được xóa`);
+          loadCitizens();
+        } else {
+          alert(`✗ Không thể xóa: ${data.error || resp.statusText}`);
+        }
+      } catch (e) {
+        alert(`Lỗi: ${e.message}`);
+      }
+    }
+
+    async function loadThirdParties() {
+      try {
+        const token = localStorage.getItem('sessionId');
+        const response = await fetch(`${API_URL}/api/storage/thirdparty-users`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const data = await response.json();
+
+        let html = '<table><tr><th>Hành Động</th><th>Third-party ID</th><th>Email</th><th>Tổ Chức</th><th>Người Liên Hệ</th><th>Tạo Lúc</th></tr>';
+        data.thirdparty_users?.forEach(tp => {
+          html += `<tr><td><button onclick="deleteThirdParty('${tp.thirdparty_id}')" style="background:#c62828;">Xóa</button></td><td>${tp.thirdparty_id}</td><td>${tp.email || 'N/A'}</td><td>${tp.org_name || 'N/A'}</td><td>${tp.contact_person || 'N/A'}</td><td>${tp.created_at ? new Date(tp.created_at).toLocaleString('vi-VN') : 'N/A'}</td></tr>`;
+        });
+        html += '</table>';
+        document.getElementById('thirdparty-list').innerHTML = html || '<p>Không có dữ liệu</p>';
+      } catch (e) {
+        document.getElementById('thirdparty-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function deleteThirdParty(thirdpartyId) {
+      if (!confirm(`Xác nhận xóa bên thứ ba "${thirdpartyId}"?`)) return;
+      try {
+        const token = localStorage.getItem('sessionId') || '';
+        const resp = await fetch(`${API_URL}/api/storage/thirdparty-users/${thirdpartyId}`, {
+          method: 'DELETE',
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok) {
+          alert(`✓ Bên thứ ba ${thirdpartyId} đã được xóa`);
+          loadThirdParties();
+        } else {
+          alert(`✗ Không thể xóa: ${data.error || resp.statusText}`);
+        }
+      } catch (e) {
+        alert(`Lỗi: ${e.message}`);
+      }
+    }
+
+    async function deleteOfficer(officerId) {
+      if (!confirm(`Xác nhận xóa officer "${officerId}"?`)) return;
+      try {
+        const token = localStorage.getItem('sessionId') || '';
+        const resp = await fetch(`${API_URL}/api/storage/officers/${officerId}`, {
+          method: 'DELETE',
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok) {
+          alert(`✓ Officer ${officerId} đã được xóa`);
+          loadUsers();
+        } else {
+          alert(`✗ Không thể xóa: ${data.error || resp.statusText}`);
+        }
+      } catch (e) {
+        alert(`Lỗi: ${e.message}`);
+      }
+    }
+
+    // Audit log UI and fetch removed per request.
+
+    async function login() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+
+      try {
+        const response = await fetch(`${API_URL}/api/storage/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: username, password: password, user_type: 'storage_admin' })
+        });
+        const data = await response.json();
+        if (data.session_id) {
+          const sessionId = data.session_id;
+          localStorage.setItem('sessionId', sessionId);
+          localStorage.setItem('user_id', username);
+          localStorage.setItem('user_type', 'storage_admin');
+          document.getElementById('login-result').innerHTML = `<div class="success">✓ Đăng nhập thành công! Session: ${sessionId}</div>`;
+          updateAuthUI();
+        } else {
+          document.getElementById('login-result').innerHTML = `<div class="error">Đăng nhập thất bại: ${data.error}</div>`;
+        }
+      } catch (e) {
+        document.getElementById('login-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    function updateAuthUI() {
+      const sid = localStorage.getItem('sessionId');
+      const loginResult = document.getElementById('login-result');
+      if (sid) {
+        if (loginResult) loginResult.innerHTML = `<div class="success">Đã đăng nhập</div>`;
+        const navLogin = document.getElementById('nav-login');
+        const navLogout = document.getElementById('nav-logout');
+        if (navLogin) navLogin.style.display = 'none';
+        if (navLogout) navLogout.style.display = 'inline';
+      } else {
+        if (loginResult) loginResult.innerHTML = '';
+        const navLogin = document.getElementById('nav-login');
+        const navLogout = document.getElementById('nav-logout');
+        if (navLogin) navLogin.style.display = 'inline';
+        if (navLogout) navLogout.style.display = 'none';
+      }
+    }
+
+    function storageLogout() {
+      localStorage.removeItem('sessionId');
+      localStorage.removeItem('user_id');
+      localStorage.removeItem('user_type');
+      updateAuthUI();
+      showSection('login');
+    }
+
+    updateAuthUI();
+    showSection('login');
+  </script>
+</body>
+</html>

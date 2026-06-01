@@ -4,94 +4,31 @@
     state: directory
     mode: '0755'
 
-- name: Write doc-service app
+- name: Ensure doc-service state directory exists (for persisted keys)
+  file:
+    path: /opt/govportal/doc-service/state
+    state: directory
+    mode: '0700'
+
+- name: Ensure doc-service OpenSSL bundle directories exist
+  file:
+    path: /opt/govportal/doc-service/openssl/providers
+    state: directory
+    mode: '0755'
+
+- name: Copy VM-built OpenSSL install for doc-service build parity
+  shell: |
+    set -e
+    rm -rf /opt/govportal/doc-service/openssl
+    cp -a /opt/openssl /opt/govportal/doc-service/openssl
+  args:
+    executable: /bin/bash
+
+- name: Write doc-service app with ML-DSA support
   copy:
+    src: app.py
     dest: /opt/govportal/doc-service/app.py
     mode: '0644'
-    content: |
-      from flask import Flask, request, jsonify
-      import hvac, hashlib, base64, os, time, logging
-
-      logging.basicConfig(level=logging.INFO,
-        format='{"ts":"%(asctime)s","level":"%(levelname)s",%(message)s}')
-
-      app = Flask(__name__)
-      vc = hvac.Client(
-        url=os.environ.get("VAULT_ADDR", "http://10.0.3.10:8200"),
-        token=os.environ.get("VAULT_TOKEN", "")
-      )
-
-
-      def log_event(event, extra=None):
-        payload = {"\"event\"": '"' + event + '"'}
-        if extra:
-          payload.update(extra)
-        logging.info(",".join(f'{key}:{value}' for key, value in payload.items()))
-
-
-      @app.route("/api/documents/sign", methods=["POST"])
-      def sign_document():
-        data = request.get_json()
-        doc_b64 = data["document_base64"]
-        doc_bytes = base64.b64decode(doc_b64)
-        doc_hash = hashlib.sha256(doc_bytes).hexdigest()
-
-        sig_resp = vc.secrets.transit.sign_data(
-          name="mldsa-doc-signing",
-          hash_input=doc_b64,
-          hash_algorithm="sha2-256"
-        )
-        signature = sig_resp["data"]["signature"]
-
-        enc_resp = vc.secrets.transit.encrypt_data(
-          name="doc-encryption",
-          plaintext=doc_b64
-        )["data"]
-
-        log_event("document_signed", {
-          '"doc_id"': f'"{doc_hash[:16]}"'
-        })
-
-        return jsonify({
-          "doc_id": doc_hash[:16],
-          "doc_hash_sha256": doc_hash,
-          "signature": signature,
-          "ciphertext": enc_resp["ciphertext"],
-          "key_version": enc_resp["key_version"],
-          "signed_at": time.time()
-        }), 201
-
-
-      @app.route("/api/documents/verify", methods=["POST"])
-      def verify_document():
-        data = request.get_json()
-        doc_b64 = data["document_base64"]
-        doc_bytes = base64.b64decode(doc_b64)
-        doc_hash = hashlib.sha256(doc_bytes).hexdigest()
-
-        verify_resp = vc.secrets.transit.verify_signed_data(
-          name="mldsa-doc-signing",
-          hash_input=doc_b64,
-          signature=data["signature"],
-          hash_algorithm="sha2-256"
-        )
-        valid = bool(verify_resp["data"]["valid"])
-
-        log_event("document_verified", {
-          '"doc_hash"': f'"{doc_hash}"',
-          '"valid"': str(valid).lower()
-        })
-        return jsonify({"valid": valid, "doc_hash": doc_hash,
-                        "tampered": not valid}), 200 if valid else 400
-
-
-      @app.route("/health")
-      def health():
-        return jsonify({"status": "ok"})
-
-
-      if __name__ == "__main__":
-        app.run(host="0.0.0.0", port=5000)
 
 - name: Write doc-service Dockerfile
   copy:
@@ -100,8 +37,14 @@
     content: |
       FROM python:3.11-slim
       WORKDIR /app
-      RUN pip install --no-cache-dir flask hvac
+      RUN python -m pip install --upgrade pip
+      RUN pip install --no-cache-dir cryptography flask requests
       COPY app.py .
+      COPY openssl/ /opt/openssl/
+      ENV OPENSSL_BIN=/opt/openssl/bin/openssl
+      ENV OPENSSL_LIB_DIR=/opt/openssl/lib64
+      ENV OPENSSL_MODULES=/opt/openssl/lib64/ossl-modules
+      ENV LD_LIBRARY_PATH=/opt/openssl/lib64
       EXPOSE 5000
       CMD ["python", "app.py"]
 
@@ -109,16 +52,21 @@
   shell: |
     set -e
     docker network inspect internal-net >/dev/null 2>&1 || docker network create internal-net
-    docker network inspect mgmt-net >/dev/null 2>&1 || docker network create mgmt-net
     docker build -t govportal-doc-service /opt/govportal/doc-service
     docker rm -f doc-service >/dev/null 2>&1 || true
     docker run -d --name doc-service \
       --network internal-net \
-      -p 5000:5000 \
-      -e VAULT_ADDR="{{ vault_addr | default('http://10.0.3.10:8200') }}" \
-      -e VAULT_TOKEN="{{ vault_token | default('') }}" \
+      --restart unless-stopped \
+      --health-cmd="python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')\" || exit 1" \
+      --health-interval=10s \
+      --health-timeout=5s \
+      --health-retries=3 \
+      -v /opt/govportal/doc-service/state:/state:rw \
+      -e STORAGE_SERVICE_URL="{{ storage_service_url }}" \
+      -e ML_ENABLED=true \
+      -e DOC_STATE_DIR=/state \
+      -p {{ internal_bind_ip }}:5000:5000 \
       govportal-doc-service
-    docker network connect mgmt-net doc-service >/dev/null 2>&1 || true
   args:
     executable: /bin/bash
   changed_when: true

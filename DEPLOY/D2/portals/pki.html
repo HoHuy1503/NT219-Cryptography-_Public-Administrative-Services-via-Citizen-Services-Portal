@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cổng Quản Trị PKI</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    header { background: linear-gradient(135deg, #6f42c1 0%, #5a32a3 100%); color: white; padding: 30px; margin-bottom: 30px; border-radius: 8px; }
+    header h1 { font-size: 2em; margin-bottom: 10px; }
+    header p { opacity: 0.9; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .card { margin-bottom: 20px; }
+    .section { display: none; padding-top: 8px; }
+    .card h2 { color: #5a32a3; margin-bottom: 15px; }
+    button { background: #6f42c1; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1em; }
+    button:hover { background: #5a32a3; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
+    input[type="text"], textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em; }
+    textarea { resize: vertical; min-height: 100px; font-family: monospace; }
+    .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+    .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
+    nav { background: #333; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
+    nav a { color: white; text-decoration: none; margin-right: 20px; }
+    nav a:hover { color: #6f42c1; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.85em; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+    th { background: #f5f5f5; font-weight: bold; }
+    tr:hover { background: #f9f9f9; }
+    .key-display { background: #f9f9f9; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 0.85em; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Cổng Quản Trị PKI</h1>
+      <p>Quản lý chứng chỉ số theo officer, khóa công khai, xoay khóa</p>
+    </header>
+
+    <nav>
+      <a href="#dashboard" onclick="showSection('dashboard')">Trang Chủ</a>
+      <a href="#certificates" onclick="showSection('certificates')">Chứng Chỉ</a>
+      <a href="#officer-keys" onclick="showSection('officer-keys'); loadAllOfficerKeys()">Khóa</a>
+      <a id="nav-login" href="#login" onclick="showSection('login')">Đăng Nhập</a>
+      <a id="nav-logout" href="#" onclick="pkiLogout()" style="display:none; margin-left:10px;">Đăng Xuất</a>
+    </nav>
+
+    <div id="dashboard" class="section">
+      <div class="card">
+        <h2>Chào Mừng Đến Với Cổng Quản Trị PKI</h2>
+        <p>Vui lòng sử dụng menu bên trên để quản lý chứng chỉ và khóa công khai của officer.</p>
+      </div>
+    </div>
+
+    <div id="certificates" class="section" style="display:none;">
+      <div class="card">
+        <h2>Yêu Cầu Cấp Chứng Chỉ</h2>
+        <button onclick="listCertRequests()">Tải Yêu Cầu</button>
+        <div id="cert-requests-list" style="margin-top: 20px;"></div>
+      </div>
+      <div class="card" style="margin-top: 20px;">
+        <h2>Danh Sách Chứng Chỉ Theo Officer</h2>
+        <div class="form-group">
+          <label>Lọc theo ID Officer (tùy chọn):</label>
+          <input type="text" id="cert-filter-officer-id" placeholder="officer_001">
+        </div>
+        <button onclick="listCertificates()">Tải Danh Sách</button>
+        <div id="certs-list" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+
+    <!-- Officer Keys (All) -->
+    <div id="officer-keys" class="section" style="display:none;">
+      <div class="card">
+        <h2>Tất Cả Public Key Officer</h2>
+        <div class="form-group">
+          <button onclick="loadAllOfficerKeys()">Làm Mới Danh Sách</button>
+          <button onclick="downloadOfficerKeysJSON()">Tải Xuống JSON</button>
+          <button onclick="downloadOfficerKeysPEM()">Tải Xuống PEM (ZIP)</button>
+        </div>
+        <div id="officer-keys-list" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+
+    <div id="login" class="section" style="display:none;">
+      <div class="card">
+        <h2>Đăng Nhập</h2>
+        <div class="form-group">
+          <label>ID Người Dùng:</label>
+          <input type="text" id="username" >
+        </div>
+        <div class="form-group">
+          <label>Mật Khẩu:</label>
+          <input type="password" id="password">
+        </div>
+        <button onclick="login()">Đăng Nhập</button>
+        <div id="login-result" style="margin-top: 20px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = `${window.location.protocol}//${window.location.hostname}:8080`;
+
+    function authHeaders() {
+      const sessionId = localStorage.getItem('sessionId');
+      const headers = { 'Content-Type': 'application/json' };
+      if (sessionId) headers.Authorization = `Bearer ${sessionId}`;
+      return headers;
+    }
+
+    function showSection(section) {
+      document.querySelectorAll('.section').forEach(s => (s.style.display = 'none'));
+      const sectionMap = {
+        dashboard: 'dashboard',
+        certificates: 'certificates',
+        keys: 'keys',
+        'officer-keys': 'officer-keys',
+        'officer-key-status': 'officer-key-status',
+        login: 'login',
+      };
+      const elementId = sectionMap[section];
+      if (elementId) document.getElementById(elementId).style.display = 'block';
+    }
+
+    function updateAuthUI() {
+      const sessionId = localStorage.getItem('sessionId');
+      const loginResult = document.getElementById('login-result');
+      const navLogin = document.getElementById('nav-login');
+      const navLogout = document.getElementById('nav-logout');
+      if (sessionId) {
+        if (loginResult) loginResult.innerHTML = '<div class="success">Đã đăng nhập</div>';
+        if (navLogin) navLogin.style.display = 'none';
+        if (navLogout) navLogout.style.display = 'inline';
+      } else {
+        if (loginResult) loginResult.innerHTML = '<div class="info">Chưa đăng nhập</div>';
+        if (navLogin) navLogin.style.display = 'inline';
+        if (navLogout) navLogout.style.display = 'none';
+      }
+    }
+
+    function pkiLogout() {
+      localStorage.removeItem('sessionId');
+      localStorage.removeItem('user_id');
+      localStorage.removeItem('user_type');
+      updateAuthUI();
+      showSection('login');
+    }
+
+    async function login() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+      if (!username || !password) {
+        document.getElementById('login-result').innerHTML = '<div class="error">Vui lòng nhập ID và mật khẩu</div>';
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_URL}/api/storage/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: username, password, user_type: 'pki_admin' }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.session_id) {
+          document.getElementById('login-result').innerHTML = `<div class="error">Đăng nhập thất bại: ${data.error || 'Không thể đăng nhập'}</div>`;
+          return;
+        }
+
+        localStorage.setItem('sessionId', data.session_id);
+        localStorage.setItem('user_id', username);
+        localStorage.setItem('user_type', 'pki_admin');
+        document.getElementById('login-result').innerHTML = `<div class="success">Đăng nhập thành công!</div>`;
+        updateAuthUI();
+      } catch (e) {
+        document.getElementById('login-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function issueCertificate() {
+      // Direct issuance disabled. Use the pending request approval workflow instead.
+      alert('Chức năng cấp trực tiếp đã bị tắt. Vui lòng duyệt yêu cầu trong phần "Yêu Cầu Cấp Chứng Chỉ Officer".');
+    }
+
+    async function listCertRequests() {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/officer-cert-requests`, { headers: authHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải yêu cầu');
+        
+        // Separate renewal and initial requests
+        const renewal = (data.requests || []).filter(r => {
+          try { 
+            const meta = r.metadata;
+            if (typeof meta === 'string') {
+              const m = JSON.parse(meta);
+              return m.renewal === true;
+            } else if (meta && typeof meta === 'object') {
+              return meta.renewal === true;
+            }
+            return false;
+          } catch { 
+            return false; 
+          }
+        });
+        const initial = (data.requests || []).filter(r => {
+          try { 
+            const meta = r.metadata;
+            if (typeof meta === 'string') {
+              const m = JSON.parse(meta);
+              return m.renewal !== true;
+            } else if (meta && typeof meta === 'object') {
+              return meta.renewal !== true;
+            }
+            return true; 
+          } catch { 
+            return true; 
+          }
+        });
+        
+        let html = '';
+        
+        // Initial requests section
+        if (initial.length > 0) {
+          html += '<h3>Yêu Cầu Cấp Chứng Chỉ</h3>';
+          html += '<table><tr><th>Request ID</th><th>Officer ID</th><th>CN</th><th>Org</th><th>Created</th><th>Status</th><th>Hành Động</th></tr>';
+          initial.forEach(r => {
+            html += `<tr><td>${r.request_id}</td><td>${r.officer_id}</td><td>${r.common_name || r.ou || ''}</td><td>${r.organization || ''}</td><td>${r.created_at || ''}</td><td>${r.status}</td><td>${r.status === 'PENDING' ? `<button onclick="approveCertRequest('${r.request_id}')">Duyệt</button> <button onclick="denyCertRequest('${r.request_id}')">Từ chối</button>` : r.status}</td></tr>`;
+          });
+          html += '</table>';
+        }
+        
+        // Renewal requests section
+        if (renewal.length > 0) {
+          html += '<h3 style="margin-top:30px;">Yêu Cầu Cấp Lại Chứng Chỉ (Renewal)</h3>';
+          html += '<table><tr><th>Request ID</th><th>Officer ID</th><th>Lý Do</th><th>Created</th><th>Status</th><th>Hành Động</th></tr>';
+          renewal.forEach(r => {
+            let reason = 'renewal';
+            try {
+              const meta = r.metadata;
+              if (typeof meta === 'string') {
+                const m = JSON.parse(meta);
+                reason = m.reason || 'renewal';
+              } else if (meta && typeof meta === 'object') {
+                reason = meta.reason || 'renewal';
+              }
+            } catch (e) {
+              // ignore parse errors
+            }
+            html += `<tr><td>${r.request_id}</td><td>${r.officer_id}</td><td>${reason}</td><td>${r.created_at || ''}</td><td>${r.status}</td><td>${r.status === 'PENDING' ? `<button onclick="approveCertRequest('${r.request_id}')">Duyệt (Làm hết hạn key cũ)</button> <button onclick="denyCertRequest('${r.request_id}')">Từ chối</button>` : r.status}</td></tr>`;
+          });
+          html += '</table>';
+        }
+        
+        if (!(data.requests || []).length) html = '<div class="info">Không có yêu cầu nào.</div>';
+        document.getElementById('cert-requests-list').innerHTML = html;
+      } catch (e) {
+        document.getElementById('cert-requests-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function approveCertRequest(requestId) {
+      if (!confirm('Bạn chắc chắn muốn cấp chứng chỉ cho yêu cầu này?')) return;
+      try {
+        const response = await fetch(`${API_URL}/api/storage/officer-cert-requests/${requestId}/approve`, { method: 'POST', headers: authHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Duyệt yêu cầu thất bại');
+        alert('Đã cấp cert: ' + (data.cert_id || 'N/A'));
+        listCertRequests();
+        listCertificates();
+      } catch (e) {
+        alert('Lỗi: ' + e.message);
+        listCertRequests();
+      }
+    }
+
+    async function denyCertRequest(requestId) {
+      if (!confirm('Bạn chắc chắn muốn từ chối yêu cầu này?')) return;
+      try {
+        const response = await fetch(`${API_URL}/api/storage/officer-cert-requests/${requestId}/deny`, { method: 'POST', headers: authHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Từ chối yêu cầu thất bại');
+        alert('Yêu cầu đã bị từ chối');
+        listCertRequests();
+      } catch (e) {
+        alert('Lỗi: ' + e.message);
+        listCertRequests();
+      }
+    }
+
+    async function downloadCertificatePem(certId) {
+      try {
+        const response = await fetch(`${API_URL}/api/pki/certificates/${certId}`);
+        const pem = await response.text();
+        if (!response.ok) throw new Error(pem || 'Không thể tải chứng chỉ');
+        const blob = new Blob([pem], { type: 'application/x-pem-file' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${certId}.pem`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        document.getElementById('certs-list').innerHTML = `<div class="error">Lỗi tải cert: ${e.message}</div>`;
+      }
+    }
+
+    async function listCertificates() {
+      try {
+        const officerFilter = document.getElementById('cert-filter-officer-id').value.trim();
+        const response = await fetch(`${API_URL}/api/pki/certificates${officerFilter ? `?officer_id=${encodeURIComponent(officerFilter)}` : ''}`);
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách chứng chỉ');
+        let html = '<table><tr><th>Cert ID</th><th>Officer ID</th><th>Purpose</th><th>Subject</th><th>Hiệu Lực Đến</th><th>Tải</th></tr>';
+        (data.certificates || []).slice(0, 20).forEach(cert => {
+          html += `<tr><td>${cert.cert_id}</td><td>${cert.officer_id || 'N/A'}</td><td>${cert.purpose || 'officer_identity'}</td><td>${cert.subject || 'N/A'}</td><td>${cert.not_after || 'N/A'}</td><td><button onclick="downloadCertificatePem('${cert.cert_id}')">PEM</button></td></tr>`;
+        });
+        html += '</table>';
+        if (!data.certificates || data.certificates.length === 0) html = '<p>Không có certificate nào phù hợp bộ lọc officer.</p>';
+        document.getElementById('certs-list').innerHTML = html;
+      } catch (e) {
+        document.getElementById('certs-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function listPublicKeys() {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/pki/officer-keys-export`, { headers: authHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải dữ liệu');
+        let html = '<table><tr><th>Officer ID</th><th>Tên</th><th>Email</th><th>Vùng</th><th>Loại</th><th>Tạo Lúc</th><th>Hết Hạn</th></tr>';
+        (data.officers || []).forEach(officer => {
+          (officer.keys || []).forEach(key => {
+            if (!key.is_current) return; // Chỉ hiển thị khóa hiện tại
+            html += `<tr><td>${officer.officer_id}</td><td>${officer.name || 'N/A'}</td><td>${officer.email || 'N/A'}</td><td>${officer.region_code || 'N/A'}</td><td>${key.key_type || 'N/A'}</td><td>${key.created_at || 'N/A'}</td><td>${key.expires_at || 'N/A'}</td></tr>`;
+          });
+        });
+        html += '</table>';
+        document.getElementById('keys-list').innerHTML = html || '<p>Không có dữ liệu</p>';
+      } catch (e) {
+        document.getElementById('keys-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    async function loadAllOfficerKeys() {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/pki/officer-keys-export`, { headers: authHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải khóa officer');
+        let html = '<table style="font-size: 0.80em;"><tr><th>Officer ID</th><th>Tên</th><th>Email</th><th>Vùng</th><th>Loại</th><th>Trạng Thái</th><th>Tạo Lúc</th><th>Hết Hạn</th><th>Phiên Bản</th></tr>';
+        let totalKeys = 0;
+        (data.officers || []).forEach(officer => {
+          (officer.keys || []).forEach(key => {
+            totalKeys += 1;
+            const status = key.is_current ? '<span style="color:green; font-weight:bold;">Còn hiệu lực</span>' : '<span style="color:red; font-weight:bold;">Hết hạn</span>';
+            html += `<tr><td>${officer.officer_id}</td><td>${officer.name || 'N/A'}</td><td>${officer.email || 'N/A'}</td><td>${officer.region_code || 'N/A'}</td><td>${key.key_type || 'N/A'}</td><td>${status}</td><td>${new Date(key.created_at).toLocaleString('vi-VN')}</td><td>${key.expires_at ? new Date(key.expires_at).toLocaleString('vi-VN') : 'N/A'}</td><td>${key.key_version || '1'}</td></tr>`;
+          });
+        });
+        html += '</table>';
+        const summary = `<p><strong>Tập Hợp:</strong> ${data.officer_count || 0} officer, ${totalKeys} khóa | <strong>Cập Nhật:</strong> ${new Date(data.exported_at || Date.now()).toLocaleString('vi-VN')}</p>`;
+        document.getElementById('officer-keys-list').innerHTML = summary + html;
+        window.lastOfficerKeysExport = data;
+      } catch (e) {
+        document.getElementById('officer-keys-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    function downloadOfficerKeysJSON() {
+      if (!window.lastOfficerKeysExport) return alert('Vui lòng tải danh sách trước');
+      const blob = new Blob([JSON.stringify(window.lastOfficerKeysExport, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `officer-keys-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadOfficerKeysPEM() {
+      if (!window.lastOfficerKeysExport) return alert('Vui lòng tải danh sách trước');
+      let content = `Officer Public Keys Export (${new Date().toISOString()})\n`;
+      content += `Exported by: ${window.lastOfficerKeysExport.exported_by || 'N/A'}\n`;
+      content += `Total Officers: ${window.lastOfficerKeysExport.officer_count || 0}\n`;
+      content += `${'='.repeat(80)}\n\n`;
+      (window.lastOfficerKeysExport.officers || []).forEach(officer => {
+        content += `Officer: ${officer.officer_id}\n`;
+        content += `  Name: ${officer.name || 'N/A'}\n`;
+        content += `  Email: ${officer.email || 'N/A'}\n`;
+        content += `  Region: ${officer.region_code || 'N/A'}\n`;
+        content += `${'-'.repeat(40)}\n`;
+        (officer.keys || []).forEach(key => {
+          content += `\nKey ID: ${key.key_id}\n`;
+          content += `Type: ${key.key_type} | Version: ${key.key_version} | Current: ${key.is_current ? 'YES' : 'NO'}\n`;
+          content += `Created: ${key.created_at} | Expires: ${key.expires_at || 'N/A'}\n`;
+          content += `${'-=-'.repeat(20)}\n`;
+          content += `${key.public_key_pem || ''}\n`;
+          content += `${'-=-'.repeat(20)}\n\n`;
+        });
+        content += `${'='.repeat(80)}\n\n`;
+      });
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `officer-keys-${new Date().toISOString().split('T')[0]}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function loadOfficerKeyStatus() {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/pki/officer-keys-export`, { headers: authHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải dữ liệu');
+        
+        let html = '<table style="font-size: 0.85em;"><tr><th>Officer ID</th><th>Tên</th><th>Loại</th><th>Trạng Thái</th><th>Tạo Lúc</th><th>Hết Hạn Lúc</th><th>Phiên Bản</th></tr>';
+        (data.officers || []).forEach(officer => {
+          (officer.keys || []).forEach(key => {
+            const now = new Date();
+            const expiresAt = new Date(key.expires_at || 0);
+            const isExpired = expiresAt < now;
+            const statusDisplay = key.is_current 
+              ? (isExpired ? '<span style="color:red; font-weight:bold;">Hết hạn</span>' : '<span style="color:green; font-weight:bold;">Còn hiệu lực</span>')
+              : '<span style="color:orange;">Cũ (không sử dụng)</span>';
+            html += `<tr><td>${officer.officer_id}</td><td>${officer.name || 'N/A'}</td><td>${key.key_type || 'N/A'}</td><td>${statusDisplay}</td><td>${new Date(key.created_at).toLocaleString('vi-VN')}</td><td>${key.expires_at ? new Date(key.expires_at).toLocaleString('vi-VN') : 'N/A'}</td><td>${key.key_version || '1'}</td></tr>`;
+          });
+        });
+        html += '</table>';
+        const summary = `<p><strong>Cập Nhật:</strong> ${new Date().toLocaleString('vi-VN')}</p>`;
+        document.getElementById('officer-key-status-list').innerHTML = summary + html;
+      } catch (e) {
+        document.getElementById('officer-key-status-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+      }
+    }
+    showSection('login');
+  </script>
+</body>
+</html>

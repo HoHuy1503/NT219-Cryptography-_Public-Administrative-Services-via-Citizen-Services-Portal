@@ -1,7 +1,7 @@
 *.key
 *.pem
 .env
-vault-token
 secrets/
 __pycache__/
 *.pyc
+

@@ -1,0 +1,178 @@
+- name: Ensure NGINX is installed
+  apt:
+    name: nginx
+    state: present
+    update_cache: yes
+
+- name: Deploy shared API proxy routes snippet
+  copy:
+    dest: /etc/nginx/snippets/govportal-api-routes.conf
+    mode: '0644'
+    content: |
+      # API Routes proxy to internal services
+      location /api/documents/ {
+        proxy_pass http://{{ internal_service_ip }}:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      location /api/pki/ {
+        proxy_pass http://{{ internal_service_ip }}:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      location /api/storage/ {
+        proxy_pass http://{{ internal_service_ip }}:9003;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      location /api/qr/ {
+        proxy_pass http://{{ internal_service_ip }}:5002;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+- name: Deploy DMZ gateway config
+  copy:
+    dest: /etc/nginx/conf.d/govportal-gateway.conf
+    mode: '0644'
+    content: |
+      server {
+        listen {{ gateway_listen_ip }}:{{ gateway_listen_port }};
+        server_name _;
+        root /var/www/govportal;
+
+        location = /health {
+          add_header Content-Type application/json;
+          return 200 '{"status":"ok","gateway":"dmz"}';
+        }
+
+        include /etc/nginx/snippets/govportal-api-routes.conf;
+
+        location = / {
+          return 200 'GovPortal DMZ Gateway is running';
+          add_header Content-Type text/plain;
+        }
+      }
+
+      server {
+        listen {{ gateway_listen_ip }}:{{ citizen_port }};
+        server_name _;
+        root /var/www/govportal;
+
+        include /etc/nginx/snippets/govportal-api-routes.conf;
+
+        location = / {
+          return 302 /citizen.html;
+        }
+
+        location / {
+          try_files $uri $uri/ =404;
+          add_header Cache-Control "public, max-age=3600";
+        }
+      }
+
+      server {
+        listen {{ gateway_listen_ip }}:{{ officer_port }};
+        server_name _;
+        root /var/www/govportal;
+
+        include /etc/nginx/snippets/govportal-api-routes.conf;
+
+        location = / {
+          return 302 /officer.html;
+        }
+
+        location / {
+          try_files $uri $uri/ =404;
+          add_header Cache-Control "public, max-age=3600";
+        }
+      }
+
+      server {
+        listen {{ gateway_listen_ip }}:{{ pki_port }};
+        server_name _;
+        root /var/www/govportal;
+
+        include /etc/nginx/snippets/govportal-api-routes.conf;
+
+        location = / {
+          return 302 /pki.html;
+        }
+
+        location / {
+          try_files $uri $uri/ =404;
+          add_header Cache-Control "public, max-age=3600";
+        }
+      }
+
+      server {
+        listen {{ gateway_listen_ip }}:{{ thirdparty_port }};
+        server_name _;
+        root /var/www/govportal;
+
+        include /etc/nginx/snippets/govportal-api-routes.conf;
+
+        location = / {
+          return 302 /thirdparty.html;
+        }
+
+        location / {
+          try_files $uri $uri/ =404;
+          add_header Cache-Control "public, max-age=3600";
+        }
+      }
+
+      server {
+        listen {{ gateway_listen_ip }}:{{ storage_admin_port }};
+        server_name _;
+        root /var/www/govportal;
+
+        include /etc/nginx/snippets/govportal-api-routes.conf;
+
+        location = / {
+          return 302 /storage_admin.html;
+        }
+
+        location / {
+          try_files $uri $uri/ =404;
+          add_header Cache-Control "public, max-age=3600";
+        }
+      }
+
+- name: Disable default NGINX site if present
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+
+- name: Ensure portal directory exists
+  file:
+    path: /var/www/govportal
+    state: directory
+    mode: '0755'
+
+- name: Copy portal files to DMZ gateway
+  copy:
+    src: "{{ item }}"
+    dest: "/var/www/govportal/{{ item | basename }}"
+    mode: '0644'
+  with_fileglob:
+    - "{{ playbook_dir }}/../portals/*.html"
+    - "{{ playbook_dir }}/../portals/*.css"
+    - "{{ playbook_dir }}/../portals/*.js"
+
+- name: Ensure NGINX is enabled and running
+  systemd:
+    name: nginx
+    state: restarted
+    enabled: yes

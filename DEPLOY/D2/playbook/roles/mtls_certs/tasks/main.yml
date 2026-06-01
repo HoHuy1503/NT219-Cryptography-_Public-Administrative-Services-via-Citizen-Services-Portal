@@ -4,6 +4,12 @@
     state: present
     update_cache: yes
 
+- name: Ensure local OpenSSL bundle directories exist
+  file:
+    path: /opt/openssl/providers
+    state: directory
+    mode: '0755'
+
 - name: Ensure NGINX cert directory exists
   file:
     path: /etc/nginx/certs
@@ -14,9 +20,12 @@
   shell: |
     set -e
     if [ ! -f /etc/nginx/certs/server.crt ] || [ ! -f /etc/nginx/certs/server.key ]; then
-      openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+      export LD_LIBRARY_PATH=/opt/openssl/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+      /opt/openssl/bin/openssl ecparam -name prime256v1 -genkey -noout \
+        -out /etc/nginx/certs/server.key
+      /opt/openssl/bin/openssl req -x509 -new -days 365 \
+        -key /etc/nginx/certs/server.key \
         -subj "/CN=govportal-dmz" \
-        -keyout /etc/nginx/certs/server.key \
         -out /etc/nginx/certs/server.crt
     fi
   args:
