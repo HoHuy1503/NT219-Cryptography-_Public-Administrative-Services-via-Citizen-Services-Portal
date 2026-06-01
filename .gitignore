@@ -6,6 +6,5 @@ __pycache__/
 *.pyc
 *.bin
 *.log
-*.txt
-*.venv/
-*.vscode/
+.venv/
+.vscode/
