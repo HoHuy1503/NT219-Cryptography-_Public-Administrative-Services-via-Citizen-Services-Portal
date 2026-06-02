@@ -1,5 +1,4 @@
 from flask import Flask, jsonify, request
-from flask_cors import CORS
 import base64
 import hashlib
 import json
@@ -8,7 +7,6 @@ import time
 import uuid
 
 app = Flask(__name__)
-CORS(app)
 
 QR_TTL = int(os.getenv("QR_TTL", "300"))
 

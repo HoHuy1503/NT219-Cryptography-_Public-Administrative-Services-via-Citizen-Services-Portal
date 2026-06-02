@@ -3,3 +3,5 @@ requests
 psycopg2-binary
 cryptography
 flask-cors
+qrcode[pil]
+PyJWT[crypto]

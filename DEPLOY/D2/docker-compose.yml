@@ -11,6 +11,33 @@ services:
     networks:
       - internal
 
+  opa:
+    image: openpolicyagent/opa:0.68.0
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - /policies
+    volumes:
+      - ./docker/opa/policies:/policies:ro
+    networks:
+      - internal
+
+  authz_proxy:
+    build:
+      context: .
+      dockerfile: docker/authz_proxy/Dockerfile
+    volumes:
+      - ./state:/state
+    environment:
+      - STATE_ROOT=/state
+      - JWT_DIR=/state/jwt
+      - OPA_URL=http://opa:8181/v1/data/govportal/authz/allow
+    depends_on:
+      - opa
+    networks:
+      - internal
+
   doc_service:
     build:
       context: .
@@ -18,6 +45,7 @@ services:
     volumes:
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
       - ./state:/state
+      - ./state/mtls:/etc/nginx/mtls:ro
     environment:
       - OPENSSL_DIR=/opt/openssl
       - OPENSSL_BIN=/opt/openssl/apps/openssl
@@ -28,6 +56,7 @@ services:
       - PATH=/opt/openssl/apps:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/docdb
       - DOC_STATE_DIR=/state
+      - STATE_ROOT=/state
       - STORAGE_SERVICE_URL=http://storage_service:9003
     networks:
       - internal
@@ -36,9 +65,13 @@ services:
     build:
       context: .
       dockerfile: docker/storage_service/Dockerfile
+    volumes:
+      - ./state:/state
+      - ./state/mtls:/etc/nginx/mtls:ro
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/docdb
-      - LOCAL_MODE=true
+      - STATE_ROOT=/state
+      - JWT_DIR=/state/jwt
     networks:
       - internal
 
@@ -46,6 +79,8 @@ services:
     build:
       context: .
       dockerfile: docker/qr_service/Dockerfile
+    volumes:
+      - ./state/mtls:/etc/nginx/mtls:ro
     environment:
       - QR_TTL=300
     networks:
@@ -79,8 +114,16 @@ services:
     build:
       context: .
       dockerfile: docker/gateway/Dockerfile
+    volumes:
+      - ./state/mtls:/etc/nginx/mtls:ro
+    depends_on:
+      - authz_proxy
+      - storage_service
+      - doc_service
+      - qr_service
     ports:
       - "8080:80"
+      - "8443:443"
     networks:
       - internal
       - public

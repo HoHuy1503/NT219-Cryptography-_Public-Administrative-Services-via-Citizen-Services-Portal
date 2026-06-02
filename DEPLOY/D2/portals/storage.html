@@ -4,52 +4,29 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cổng Quản Trị Lưu Trữ</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    header { background: linear-gradient(135deg, #00838f 0%, #00695c 100%); color: white; padding: 30px; margin-bottom: 30px; border-radius: 8px; }
-    header h1 { font-size: 2em; margin-bottom: 10px; }
-    header p { opacity: 0.9; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .card h2 { color: #00695c; margin-bottom: 15px; }
-    button { background: #00838f; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1em; }
-    button:hover { background: #00695c; }
-    .form-group { margin-bottom: 15px; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
-    input[type="text"], textarea, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em; }
-    textarea { resize: vertical; min-height: 100px; }
-    .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    nav { background: #333; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-    nav a { color: white; text-decoration: none; margin-right: 20px; }
-    nav a:hover { color: #00838f; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em; }
-    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-    th { background: #f5f5f5; font-weight: bold; }
-    tr:hover { background: #f9f9f9; }
-    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
-    .stat-box { background: #f0f0f0; padding: 15px; border-radius: 4px; text-align: center; }
-    .stat-box h3 { font-size: 2em; color: #00695c; }
-    .stat-box p { color: #666; margin-top: 5px; }
-  </style>
+  <link rel="stylesheet" href="shared-portal.css">
+  <style>:root { --accent: #00838f; --header-gradient: linear-gradient(135deg, #00838f, #00695c); }</style>
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>💾 Cổng Quản Trị Lưu Trữ</h1>
-      <p>Quản lý tài liệu, tài khoản, và nhật ký kiểm toán</p>
+    <header class="app-header">
+      <div>
+        <h1>Cổng Quản Trị Lưu Trữ</h1>
+        <p>Quản lý tài liệu, người dùng và cơ sở dữ liệu hệ thống</p>
+      </div>
+      <div id="header-user" class="user-badge" style="display:none"></div>
     </header>
 
-    <nav>
-      <a href="#dashboard" onclick="showSection('dashboard')">Trang Chủ</a>
-      <a href="#documents" onclick="showSection('documents')">Tài Liệu</a>
-      <a href="#users" onclick="showSection('users')">Người Dùng</a>
-      <a href="#citizens" onclick="showSection('citizens')">Công Dân</a>
-      <a href="#thirdparty" onclick="showSection('thirdparty')">Bên Thứ Ba</a>
-      <a id="nav-login" href="#login" onclick="showSection('login')">Đăng Nhập</a>
-      <a id="nav-logout" href="#" onclick="storageLogout()" style="display:none; margin-left:10px;">Đăng Xuất</a>
+    <nav class="app-nav">
+      <a href="#dashboard" onclick="showSection('dashboard')">Trang chủ</a>
+      <a href="#documents" onclick="showSection('documents')">Tài liệu</a>
+      <a href="#users" onclick="showSection('users')">Cán bộ</a>
+      <a href="#citizens" onclick="showSection('citizens')">Công dân</a>
+      <a href="#thirdparty" onclick="showSection('thirdparty')">Bên thứ ba</a>
+      <a href="#database" onclick="showSection('database'); loadDbTables()">Database</a>
+      <span class="nav-spacer"></span>
+      <a id="nav-login" href="#login" onclick="showSection('login')">Đăng nhập</a>
+      <a id="nav-logout" href="#" onclick="storageLogout()" style="display:none">Đăng xuất</a>
     </nav>
 
     <!-- Dashboard -->
@@ -135,28 +112,52 @@
       </div>
     </div>
 
+    <div id="database" class="section" style="display:none;">
+      <div class="card">
+        <h2>🗃️ Quản Lý Bảng Dữ Liệu</h2>
+        <div class="warning">Cảnh báo: thao tác bên dưới có thể xóa dữ liệu thật khỏi database.</div>
+        <div class="table-tools">
+          <button class="secondary" onclick="loadDbTables()">Tải Danh Sách Bảng</button>
+          <label for="db-table-select" style="margin:0;">Bảng:</label>
+          <select id="db-table-select" onchange="onDbTableChange()" style="padding: 8px; min-width: 260px;"></select>
+          <button onclick="loadDbTableRows(0)">Xem Dữ Liệu</button>
+          <button class="danger" onclick="deleteSelectedDbRows()">Xóa Dòng Đã Chọn</button>
+          <button class="danger" onclick="truncateDbTable()">Xóa Tất Cả Dữ Liệu Bảng</button>
+        </div>
+        <div id="db-table-meta" class="muted" style="margin-bottom: 10px;"></div>
+        <div id="db-manager-result"></div>
+        <div id="db-table-data"></div>
+      </div>
+    </div>
+
     <!-- Audit Log removed -->
 
-    <!-- Login Section -->
     <div id="login" class="section" style="display:none;">
-      <div class="card">
-        <h2>🔐 Đăng Nhập</h2>
-        <div class="form-group">
-          <label>ID Người Dùng:</label>
-          <input type="text" id="username" placeholder="storage_admin_001">
+      <div class="auth-layout">
+        <div class="card">
+          <h2>Đăng nhập quản trị</h2>
+          <div class="form-group">
+            <label for="username">Tên đăng nhập</label>
+            <input type="text" id="username" autocomplete="username" placeholder="storage_admin" value="storage_admin">
+          </div>
+          <div class="form-group">
+            <label for="password">Mật khẩu</label>
+            <input type="password" id="password" autocomplete="current-password" value="storage_adm">
+          </div>
+          <button class="btn" onclick="login()">Đăng nhập</button>
+          <div id="login-result"></div>
         </div>
-        <div class="form-group">
-          <label>Mật Khẩu:</label>
-          <input type="password" id="password" placeholder="Mật khẩu">
-        </div>
-        <button onclick="login()">Đăng Nhập</button>
-        <div id="login-result" style="margin-top: 20px;"></div>
       </div>
     </div>
   </div>
 
+  <script src="portal-api.js"></script>
   <script>
-    const API_URL = 'http://localhost:8080';
+    let dbTables = [];
+    let currentDbTable = null;
+    let currentDbPageSize = 50;
+    let currentDbOffset = 0;
+    let currentDbPayload = null;
 
     function showSection(section) {
       document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
@@ -167,44 +168,234 @@
       else if (section === 'users') document.getElementById('users').style.display = 'block';
       else if (section === 'citizens') document.getElementById('citizens').style.display = 'block';
       else if (section === 'thirdparty') document.getElementById('thirdparty').style.display = 'block';
+      else if (section === 'database') document.getElementById('database').style.display = 'block';
       else if (section === 'login') document.getElementById('login').style.display = 'block';
     }
 
-    async function loadDashboardStats() {
-      try {
-        const token = localStorage.getItem('sessionId');
+    function ensureLoggedIn() {
+      if (!getSessionToken()) {
+        throw new Error('Vui lòng đăng nhập (storage_admin / storage_adm)');
+      }
+    }
 
-        // QR count (public)
-        const docsResp = await fetch(`${API_URL}/api/storage/document-qr?limit=1`);
-        const docsData = await docsResp.json();
+    function decodeJwtPayload(token) {
+      if (!token || token.split('.').length !== 3) return null;
+      try {
+        const payloadB64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = payloadB64 + '='.repeat((4 - payloadB64.length % 4) % 4);
+        return JSON.parse(atob(padded));
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function formatJwtSessionInfo(token) {
+      const payload = decodeJwtPayload(token);
+      if (!payload) {
+        return '<div class="alert error">Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.</div>';
+      }
+      const exp = payload.exp ? new Date(payload.exp * 1000).toLocaleString('vi-VN') : 'N/A';
+      const name = localStorage.getItem('display_name') || payload.sub || '';
+      return `<div class="alert success">
+        Xin chào, <strong>${name}</strong> · vai trò ${payload.user_type || ''}<br>
+        <span class="muted">Phiên hết hạn: ${exp}</span>
+      </div>`;
+    }
+
+    function setDbMessage(message, kind = 'success') {
+      const el = document.getElementById('db-manager-result');
+      el.innerHTML = `<div class="${kind}">${message}</div>`;
+    }
+
+    async function loadDbTables() {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/admin/db/tables`, { headers: buildAuthHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách bảng');
+
+        dbTables = data.tables || [];
+        const select = document.getElementById('db-table-select');
+        if (dbTables.length === 0) {
+          select.innerHTML = '';
+          document.getElementById('db-table-meta').textContent = 'Không có bảng nào trong schema public.';
+          document.getElementById('db-table-data').innerHTML = '';
+          return;
+        }
+
+        select.innerHTML = dbTables.map(t => `<option value="${t.table_name}">${t.table_name} (${t.row_count} dòng)</option>`).join('');
+        currentDbTable = select.value;
+        updateDbMeta();
+        await loadDbTableRows(0);
+      } catch (e) {
+        setDbMessage(`Lỗi: ${e.message}`, 'error');
+      }
+    }
+
+    function onDbTableChange() {
+      const select = document.getElementById('db-table-select');
+      currentDbTable = select.value;
+      updateDbMeta();
+      loadDbTableRows(0);
+    }
+
+    function updateDbMeta() {
+      if (!currentDbTable) {
+        document.getElementById('db-table-meta').textContent = '';
+        return;
+      }
+      const info = dbTables.find(t => t.table_name === currentDbTable);
+      if (!info) return;
+      const pk = (info.primary_keys || []).length > 0 ? (info.primary_keys || []).join(', ') : 'không có';
+      document.getElementById('db-table-meta').textContent = `Bảng: ${info.table_name} | Tổng dòng: ${info.row_count} | Khóa chính: ${pk}`;
+    }
+
+    async function loadDbTableRows(offset = 0) {
+      try {
+        if (!currentDbTable) {
+          setDbMessage('Vui lòng chọn bảng.', 'warning');
+          return;
+        }
+        currentDbOffset = Math.max(0, offset);
+        const response = await fetch(`${API_URL}/api/storage/admin/db/tables/${encodeURIComponent(currentDbTable)}?limit=${currentDbPageSize}&offset=${currentDbOffset}`, { headers: buildAuthHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải dữ liệu bảng');
+        currentDbPayload = data;
+        renderDbTableData(data);
+      } catch (e) {
+        setDbMessage(`Lỗi: ${e.message}`, 'error');
+      }
+    }
+
+    function renderDbTableData(data) {
+      const container = document.getElementById('db-table-data');
+      const rows = data.rows || [];
+      const cols = data.columns || [];
+      const pks = data.primary_keys || [];
+
+      if (cols.length === 0) {
+        container.innerHTML = '<p class="muted">Bảng không có cột.</p>';
+        return;
+      }
+
+      let html = `<div class="muted" style="margin-bottom:8px;">Hiển thị ${rows.length} dòng, offset ${data.offset}, tổng ${data.total_rows} dòng.</div>`;
+      html += '<table><tr><th>Chọn</th>';
+      cols.forEach(c => { html += `<th>${c}</th>`; });
+      html += '</tr>';
+
+      rows.forEach((row) => {
+        let disabled = '';
+        let pkPayload = '{}';
+        if (pks.length > 0) {
+          const selectedPk = {};
+          pks.forEach(pk => { selectedPk[pk] = row[pk]; });
+          pkPayload = encodeURIComponent(JSON.stringify(selectedPk));
+        } else {
+          disabled = 'disabled';
+        }
+
+        html += `<tr><td><input type="checkbox" class="db-row-check" data-pk="${pkPayload}" ${disabled}></td>`;
+        cols.forEach(c => {
+          const val = row[c] === null || row[c] === undefined ? '' : String(row[c]);
+          html += `<td>${val}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</table>';
+
+      const prevOffset = Math.max(0, (data.offset || 0) - (data.limit || currentDbPageSize));
+      const nextOffset = (data.offset || 0) + (data.limit || currentDbPageSize);
+      const canNext = nextOffset < (data.total_rows || 0);
+      html += `<div class="table-tools" style="margin-top:10px;">
+        <button class="secondary" onclick="loadDbTableRows(${prevOffset})" ${(data.offset || 0) === 0 ? 'disabled' : ''}>Trang Trước</button>
+        <button class="secondary" onclick="loadDbTableRows(${nextOffset})" ${canNext ? '' : 'disabled'}>Trang Sau</button>
+      </div>`;
+
+      container.innerHTML = html;
+    }
+
+    async function deleteSelectedDbRows() {
+      try {
+        if (!currentDbTable || !currentDbPayload) {
+          setDbMessage('Vui lòng tải dữ liệu bảng trước.', 'warning');
+          return;
+        }
+        const pks = currentDbPayload.primary_keys || [];
+        if (pks.length === 0) {
+          setDbMessage('Bảng này không có khóa chính, không thể xóa chọn dòng. Dùng nút xóa toàn bộ bảng.', 'warning');
+          return;
+        }
+
+        const checks = Array.from(document.querySelectorAll('.db-row-check:checked'));
+        if (checks.length === 0) {
+          setDbMessage('Bạn chưa chọn dòng nào để xóa.', 'warning');
+          return;
+        }
+
+        const pkValues = checks.map(c => JSON.parse(decodeURIComponent(c.dataset.pk)));
+        const ok = confirm(`Xóa ${pkValues.length} dòng trong bảng ${currentDbTable}?`);
+        if (!ok) return;
+
+        const response = await fetch(`${API_URL}/api/storage/admin/db/tables/${encodeURIComponent(currentDbTable)}/delete-rows`, {
+          method: 'POST',
+          headers: buildAuthHeaders(),
+          body: JSON.stringify({ pk_values: pkValues })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể xóa dòng');
+
+        setDbMessage(`Đã xóa ${data.deleted_rows || 0} dòng khỏi bảng ${currentDbTable}.`, 'success');
+        await loadDbTables();
+      } catch (e) {
+        setDbMessage(`Lỗi: ${e.message}`, 'error');
+      }
+    }
+
+    async function truncateDbTable() {
+      try {
+        if (!currentDbTable) {
+          setDbMessage('Vui lòng chọn bảng.', 'warning');
+          return;
+        }
+
+        const ok = confirm(`Bạn chắc chắn muốn xóa TẤT CẢ dữ liệu trong bảng ${currentDbTable}?`);
+        if (!ok) return;
+
+        const response = await fetch(`${API_URL}/api/storage/admin/db/tables/${encodeURIComponent(currentDbTable)}/truncate`, {
+          method: 'POST',
+          headers: buildAuthHeaders(),
+          body: JSON.stringify({ confirm: true })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể xóa dữ liệu bảng');
+
+        setDbMessage(`Đã xóa ${data.deleted_rows || 0} dòng trong bảng ${currentDbTable}.`, 'success');
+        await loadDbTables();
+      } catch (e) {
+        setDbMessage(`Lỗi: ${e.message}`, 'error');
+      }
+    }
+
+    async function loadDashboardStats() {
+      if (!getSessionToken()) return;
+      try {
+        const docsResp = await apiFetch('/api/storage/document-qr?limit=1');
+        const docsData = await docsResp.json().catch(() => ({}));
+        if (!docsResp.ok) throw new Error(docsData.error || 'Không thể tải thống kê QR');
         const qrCount = docsData.qrs?.length || 0;
         document.getElementById('qr-count').textContent = qrCount;
 
-        // User count (use public officers endpoint)
         let userCount = 0;
-        try {
-          const usersResp = await fetch(`${API_URL}/api/storage/officers?limit=1`);
-          const usersData = await usersResp.json();
-          userCount = (usersData.officers && usersData.officers.length) ? usersData.officers.length : 0;
-        } catch (e) {
-          console.warn('Could not fetch user count', e);
-        }
+        const usersResp = await apiFetch('/api/storage/officers?limit=1');
+        const usersData = await usersResp.json().catch(() => ({}));
+        if (usersResp.ok) userCount = usersData.count ?? usersData.officers?.length ?? 0;
         document.getElementById('user-count').textContent = userCount;
 
-        // Document count (requires auth). If admin logged in, fetch one document to infer non-zero.
         let docCount = 0;
-        if (token) {
-          try {
-            const docsAuthResp = await fetch(`${API_URL}/api/storage/documents?limit=1`, { headers: { 'Authorization': `Bearer ${token}` } });
-            const docsAuthData = await docsAuthResp.json();
-            docCount = (docsAuthData.documents && docsAuthData.documents.length) ? docsAuthData.documents.length : 0;
-          } catch (e) {
-            console.warn('Could not fetch documents count', e);
-          }
-        }
+        const docsAuthResp = await apiFetch('/api/storage/documents?limit=1');
+        const docsAuthData = await docsAuthResp.json().catch(() => ({}));
+        if (docsAuthResp.ok) docCount = docsAuthData.count ?? docsAuthData.documents?.length ?? 0;
         document.getElementById('doc-count').textContent = docCount;
 
-        // Hide stat boxes that are zero
         document.querySelectorAll('.stat-box').forEach((box, idx) => {
           const counts = [docCount, userCount, qrCount];
           box.style.display = (counts[idx] === 0) ? 'none' : 'block';
@@ -216,10 +407,12 @@
 
     async function loadDocuments() {
       try {
+        ensureLoggedIn();
         const type = document.getElementById('doc-type-filter').value;
         const url = type ? `${API_URL}/api/storage/document-qr?document_type=${type}` : `${API_URL}/api/storage/document-qr`;
-        const response = await fetch(url);
-        const data = await response.json();
+        const response = await fetch(url, { headers: buildAuthHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách QR');
 
         let html = '<table><tr><th>QR ID</th><th>Tài Liệu</th><th>Loại</th><th>Tạo Lúc</th><th>Lần Truy Cập</th></tr>';
         data.qrs?.forEach(qr => {
@@ -234,12 +427,14 @@
 
     async function loadUsers() {
       try {
-        const response = await fetch(`${API_URL}/api/storage/officers`);
-        const data = await response.json();
+        ensureLoggedIn();
+        const response = await fetch(`${API_URL}/api/storage/officers`, { headers: buildAuthHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách cán bộ');
 
-        let html = '<table><tr><th>Hành Động</th><th>Officer ID</th><th>Email</th><th>Phòng Ban</th><th>Tạo Lúc</th></tr>';
+        let html = '<table><tr><th></th><th>Tên đăng nhập</th><th>Họ tên</th><th>Email</th><th>Phòng ban</th><th>Tạo lúc</th></tr>';
         data.officers?.forEach(officer => {
-          html += `<tr><td><button onclick="deleteOfficer('${officer.officer_id}')" style="background:#c62828;">Xóa</button></td><td>${officer.officer_id}</td><td>${officer.email || 'N/A'}</td><td>${officer.department || 'N/A'}</td><td>${new Date(officer.created_at).toLocaleString('vi-VN')}</td></tr>`;
+          html += `<tr><td><button class="btn danger" onclick="deleteOfficer('${officer.officer_id}')">Xóa</button></td><td>${officer.officer_id}</td><td>${officer.name || '—'}</td><td>${officer.email || '—'}</td><td>${officer.department || '—'}</td><td>${new Date(officer.created_at).toLocaleString('vi-VN')}</td></tr>`;
         });
         html += '</table>';
         document.getElementById('users-list').innerHTML = html || '<p>Không có dữ liệu</p>';
@@ -250,15 +445,14 @@
 
     async function loadCitizens() {
       try {
-        const token = localStorage.getItem('sessionId');
-        const response = await fetch(`${API_URL}/api/storage/citizens`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        const data = await response.json();
+        ensureLoggedIn();
+        const response = await fetch(`${API_URL}/api/storage/citizens`, { headers: buildAuthHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách công dân');
 
-        let html = '<table><tr><th>Hành Động</th><th>Citizen ID</th><th>Email</th><th>Tên</th><th>Vùng</th><th>Đã Xác Minh</th><th>Tạo Lúc</th></tr>';
+        let html = '<table><tr><th></th><th>Tên đăng nhập</th><th>Họ tên</th><th>Email</th><th>Vùng</th><th>Xác minh</th><th>Tạo lúc</th></tr>';
         data.citizens?.forEach(citizen => {
-          html += `<tr><td><button onclick="deleteCitizen('${citizen.citizen_id}')" style="background:#c62828;">Xóa</button></td><td>${citizen.citizen_id}</td><td>${citizen.email || 'N/A'}</td><td>${citizen.name || 'N/A'}</td><td>${citizen.region_code || 'N/A'}</td><td>${citizen.verified ? 'Có' : 'Không'}</td><td>${citizen.created_at ? new Date(citizen.created_at).toLocaleString('vi-VN') : 'N/A'}</td></tr>`;
+          html += `<tr><td><button class="btn danger" onclick="deleteCitizen('${citizen.citizen_id}')">Xóa</button></td><td>${citizen.citizen_id}</td><td>${citizen.name || '—'}</td><td>${citizen.email || '—'}</td><td>${citizen.region_code || '—'}</td><td>${citizen.verified ? 'Có' : 'Không'}</td><td>${citizen.created_at ? new Date(citizen.created_at).toLocaleString('vi-VN') : '—'}</td></tr>`;
         });
         html += '</table>';
         document.getElementById('citizens-list').innerHTML = html || '<p>Không có dữ liệu</p>';
@@ -270,17 +464,16 @@
     async function deleteCitizen(citizenId) {
       if (!confirm(`Xác nhận xóa công dân "${citizenId}"?`)) return;
       try {
-        const token = localStorage.getItem('sessionId') || '';
         const resp = await fetch(`${API_URL}/api/storage/citizens/${citizenId}`, {
           method: 'DELETE',
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+          headers: buildAuthHeaders()
         });
         const data = await resp.json().catch(() => ({}));
         if (resp.ok) {
-          alert(`✓ Công dân ${citizenId} đã được xóa`);
+          alert(`Công dân ${citizenId} đã được xóa`);
           loadCitizens();
         } else {
-          alert(`✗ Không thể xóa: ${data.error || resp.statusText}`);
+          alert(`Không thể xóa: ${data.error || resp.statusText}`);
         }
       } catch (e) {
         alert(`Lỗi: ${e.message}`);
@@ -289,15 +482,14 @@
 
     async function loadThirdParties() {
       try {
-        const token = localStorage.getItem('sessionId');
-        const response = await fetch(`${API_URL}/api/storage/thirdparty-users`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        const data = await response.json();
+        ensureLoggedIn();
+        const response = await fetch(`${API_URL}/api/storage/thirdparty-users`, { headers: buildAuthHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách bên thứ ba');
 
-        let html = '<table><tr><th>Hành Động</th><th>Third-party ID</th><th>Email</th><th>Tổ Chức</th><th>Người Liên Hệ</th><th>Tạo Lúc</th></tr>';
+        let html = '<table><tr><th></th><th>Tên đăng nhập</th><th>Tổ chức</th><th>Email</th><th>Liên hệ</th><th>Tạo lúc</th></tr>';
         data.thirdparty_users?.forEach(tp => {
-          html += `<tr><td><button onclick="deleteThirdParty('${tp.thirdparty_id}')" style="background:#c62828;">Xóa</button></td><td>${tp.thirdparty_id}</td><td>${tp.email || 'N/A'}</td><td>${tp.org_name || 'N/A'}</td><td>${tp.contact_person || 'N/A'}</td><td>${tp.created_at ? new Date(tp.created_at).toLocaleString('vi-VN') : 'N/A'}</td></tr>`;
+          html += `<tr><td><button class="btn danger" onclick="deleteThirdParty('${tp.thirdparty_id}')">Xóa</button></td><td>${tp.thirdparty_id}</td><td>${tp.org_name || '—'}</td><td>${tp.email || '—'}</td><td>${tp.contact_person || '—'}</td><td>${tp.created_at ? new Date(tp.created_at).toLocaleString('vi-VN') : '—'}</td></tr>`;
         });
         html += '</table>';
         document.getElementById('thirdparty-list').innerHTML = html || '<p>Không có dữ liệu</p>';
@@ -309,17 +501,16 @@
     async function deleteThirdParty(thirdpartyId) {
       if (!confirm(`Xác nhận xóa bên thứ ba "${thirdpartyId}"?`)) return;
       try {
-        const token = localStorage.getItem('sessionId') || '';
         const resp = await fetch(`${API_URL}/api/storage/thirdparty-users/${thirdpartyId}`, {
           method: 'DELETE',
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+          headers: buildAuthHeaders()
         });
         const data = await resp.json().catch(() => ({}));
         if (resp.ok) {
-          alert(`✓ Bên thứ ba ${thirdpartyId} đã được xóa`);
+          alert(`Bên thứ ba ${thirdpartyId} đã được xóa`);
           loadThirdParties();
         } else {
-          alert(`✗ Không thể xóa: ${data.error || resp.statusText}`);
+          alert(`Không thể xóa: ${data.error || resp.statusText}`);
         }
       } catch (e) {
         alert(`Lỗi: ${e.message}`);
@@ -329,17 +520,16 @@
     async function deleteOfficer(officerId) {
       if (!confirm(`Xác nhận xóa officer "${officerId}"?`)) return;
       try {
-        const token = localStorage.getItem('sessionId') || '';
         const resp = await fetch(`${API_URL}/api/storage/officers/${officerId}`, {
           method: 'DELETE',
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+          headers: buildAuthHeaders()
         });
         const data = await resp.json().catch(() => ({}));
         if (resp.ok) {
-          alert(`✓ Officer ${officerId} đã được xóa`);
+          alert(`Officer ${officerId} đã được xóa`);
           loadUsers();
         } else {
-          alert(`✗ Không thể xóa: ${data.error || resp.statusText}`);
+          alert(`Không thể xóa: ${data.error || resp.statusText}`);
         }
       } catch (e) {
         alert(`Lỗi: ${e.message}`);
@@ -351,57 +541,61 @@
     async function login() {
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value.trim();
-
+      if (!username || !password) {
+        document.getElementById('login-result').innerHTML = '<div class="alert error">Vui lòng nhập tên đăng nhập và mật khẩu.</div>';
+        return;
+      }
       try {
-        const response = await fetch(`${API_URL}/api/storage/login`, {
+        const response = await apiFetch('/api/storage/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: username, password: password, user_type: 'storage_admin' })
+          body: { user_id: username, password, user_type: 'storage_admin' },
         });
-        const data = await response.json();
-        if (data.session_id) {
-          const sessionId = data.session_id;
-          localStorage.setItem('sessionId', sessionId);
-          localStorage.setItem('user_id', username);
-          localStorage.setItem('user_type', 'storage_admin');
-          document.getElementById('login-result').innerHTML = `<div class="success">✓ Đăng nhập thành công! Session: ${sessionId}</div>`;
+        const data = await response.json().catch(() => ({}));
+        const jwtToken = data.token || data.session_id;
+        if (response.ok && jwtToken) {
+          saveSession(data, username, username);
+          document.getElementById('login-result').innerHTML = formatJwtSessionInfo(jwtToken);
           updateAuthUI();
+          showSection('dashboard');
         } else {
-          document.getElementById('login-result').innerHTML = `<div class="error">Đăng nhập thất bại: ${data.error}</div>`;
+          clearSession();
+          document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || response.statusText}. Dùng storage_admin / storage_adm</div>`;
         }
       } catch (e) {
-        document.getElementById('login-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        clearSession();
+        document.getElementById('login-result').innerHTML = `<div class="alert error">Không kết nối được API (${API_URL}). Kiểm tra docker compose up gateway storage_service.</div>`;
       }
     }
 
     function updateAuthUI() {
       const sid = localStorage.getItem('sessionId');
       const loginResult = document.getElementById('login-result');
+      const headerUser = document.getElementById('header-user');
+      const name = localStorage.getItem('display_name') || localStorage.getItem('user_id') || '';
       if (sid) {
-        if (loginResult) loginResult.innerHTML = `<div class="success">Đã đăng nhập</div>`;
-        const navLogin = document.getElementById('nav-login');
-        const navLogout = document.getElementById('nav-logout');
-        if (navLogin) navLogin.style.display = 'none';
-        if (navLogout) navLogout.style.display = 'inline';
+        if (loginResult) loginResult.innerHTML = formatJwtSessionInfo(sid);
+        if (headerUser) {
+          headerUser.style.display = 'inline-flex';
+          headerUser.innerHTML = `<span>Quản trị viên:</span><strong>${name}</strong>`;
+        }
+        document.getElementById('nav-login').style.display = 'none';
+        document.getElementById('nav-logout').style.display = 'inline-flex';
       } else {
         if (loginResult) loginResult.innerHTML = '';
-        const navLogin = document.getElementById('nav-login');
-        const navLogout = document.getElementById('nav-logout');
-        if (navLogin) navLogin.style.display = 'inline';
-        if (navLogout) navLogout.style.display = 'none';
+        if (headerUser) headerUser.style.display = 'none';
+        document.getElementById('nav-login').style.display = 'inline-flex';
+        document.getElementById('nav-logout').style.display = 'none';
       }
     }
 
     function storageLogout() {
-      localStorage.removeItem('sessionId');
-      localStorage.removeItem('user_id');
-      localStorage.removeItem('user_type');
+      clearSession();
       updateAuthUI();
       showSection('login');
     }
 
     updateAuthUI();
-    showSection('login');
+    showSection(getSessionToken() ? 'dashboard' : 'login');
   </script>
 </body>
 </html>

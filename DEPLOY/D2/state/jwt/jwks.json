@@ -1,0 +1,13 @@
+{
+  "keys": [
+    {
+      "kty": "EC",
+      "crv": "P-256",
+      "kid": "govportal-jwt-es256-v1",
+      "use": "sig",
+      "alg": "ES256",
+      "x": "NfiVPEGDLc4gdeZJVgFvU80hJei1Is2UOtG5f-Si3hs",
+      "y": "0tnsMYOvcTbEqstWTsCTYGv0sWJDRHtPn3ufQZqwiAM"
+    }
+  ]
+}

@@ -4,253 +4,236 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cổng Cán Bộ</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    header { background: linear-gradient(135deg, #c53030 0%, #d69e2e 100%); color: white; padding: 30px; margin-bottom: 30px; border-radius: 8px; }
-    header h1 { font-size: 2em; margin-bottom: 10px; }
-    header p { opacity: 0.9; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .card h2 { color: #c53030; margin-bottom: 15px; }
-    button { background: #d69e2e; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1em; }
-    button:hover { background: #c53030; }
-    .form-group { margin-bottom: 15px; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
-    input[type="text"], input[type="password"], textarea, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em; }
-    textarea { resize: vertical; min-height: 100px; }
-    .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    .info { background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 4px; margin: 10px 0; }
-    nav { background: #333; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-    nav a { color: white; text-decoration: none; margin-right: 20px; }
-    nav a:hover { color: #d69e2e; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-    th { background: #f5f5f5; font-weight: bold; }
-    tr:hover { background: #f9f9f9; }
-  </style>
+  <link rel="stylesheet" href="shared-portal.css">
+  <style>:root { --accent: #c53030; --header-gradient: linear-gradient(135deg, #c53030, #d69e2e); }</style>
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>Cổng Cán Bộ</h1>
+    <header class="app-header">
+      <div>
+        <h1>Cổng Cán Bộ</h1>
+        <p>Ký tài liệu hành chính và quản lý chứng chỉ số</p>
+      </div>
+      <div id="header-user" class="user-badge" style="display:none"></div>
     </header>
 
-    <nav>
-      <a href="#dashboard" onclick="showSection('dashboard')">Trang Chủ</a>
-      <a href="#users" onclick="showSection('users')">Đăng Ký</a>
-      <a href="#qr-verify" onclick="showSection('qr-verify')">Xác Thực QR</a>
-      <a href="#sign-doc" onclick="showSection('sign-doc')">Ký Tài Liệu</a>
-      <a href="#keys" onclick="showSection('keys')">Chứng Chỉ Của Tôi</a>
-      <a href="#documents" onclick="showSection('documents')">Tài Liệu Đã Ký</a>
-      <a id="nav-login" href="#login" onclick="showSection('login')">Đăng Nhập</a>
-      <a id="nav-logout" href="#" onclick="officerLogout()" style="display:none; margin-left:10px;">Đăng Xuất</a>
+    <nav class="app-nav">
+      <a href="#dashboard" onclick="showSection('dashboard')">Trang chủ</a>
+      <a href="#sign-doc" onclick="showSection('sign-doc')">Ký tài liệu</a>
+      <a href="#keys" onclick="showSection('keys')">Chứng chỉ</a>
+      <a href="#documents" onclick="showSection('documents')">Tài liệu đã ký</a>
+      <span class="nav-spacer"></span>
+      <a id="nav-auth" href="#auth" onclick="showSection('auth')">Tài khoản</a>
+      <a id="nav-logout" href="#" onclick="officerLogout()" style="display:none">Đăng xuất</a>
     </nav>
 
-    <!-- Dashboard -->
-    <div id="dashboard" class="section">
+    <div id="dashboard" class="section active">
       <div class="card">
-        <h2>Chào Mừng Đến Với Cổng Cán Bộ</h2>
-        <p>Trên cổng này, cán bộ có thể đăng ký tài khoản, xem và ký các tài liệu hành chính, quản lý chứng chỉ số của mình và theo dõi lịch sử tài liệu đã ký.</p>
+        <h2>Chào mừng</h2>
+        <p class="subtitle">Cán bộ có thể xem yêu cầu ký, quản lý chứng chỉ số và theo dõi tài liệu đã ký.</p>
+        <button class="btn" onclick="showSection('sign-doc')">Xem yêu cầu ký</button>
       </div>
     </div>
 
-    <!-- Login -->
-    <div id="login" class="section" style="display:none;">
-      <div class="card">
-        <h2>Đăng Nhập Officer</h2>
-        <div class="form-group">
-          <label>Officer ID:</label>
-          <input type="text" id="login-officer-id" placeholder="officer_001">
+    <div id="auth" class="section">
+      <div class="auth-layout">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" id="auth-tab-login" onclick="showAuthTab('login')">Đăng nhập</button>
+          <button type="button" class="auth-tab" id="auth-tab-register" onclick="showAuthTab('register')">Đăng ký</button>
         </div>
-        <div class="form-group">
-          <label>Mật Khẩu:</label>
-          <input type="password" id="login-officer-password" placeholder="********">
+        <div class="card" id="auth-login-panel">
+          <h2>Đăng nhập cán bộ</h2>
+          <p class="auth-note">Tài khoản demo: <strong>officer_demo</strong> / <strong>demo12345</strong> (hoặc dùng tài khoản đã đăng ký).</p>
+          <div class="form-group">
+            <label for="login-officer-id">Tên đăng nhập</label>
+            <input type="text" id="login-officer-id" autocomplete="username" placeholder="officer_demo" value="officer_demo">
+          </div>
+          <div class="form-group">
+            <label for="login-officer-password">Mật khẩu</label>
+            <input type="password" id="login-officer-password" autocomplete="current-password" value="demo12345">
+          </div>
+          <button class="btn" onclick="officerLogin()">Đăng nhập</button>
+          <div id="login-result"></div>
         </div>
-        <button onclick="officerLogin()">Đăng Nhập</button>
-        <button onclick="officerLogout()" style="margin-left:10px; background:#777">Đăng Xuất</button>
-        <div id="login-result" style="margin-top: 20px;"></div>
+        <div class="card" id="auth-register-panel" style="display:none;">
+          <h2>Đăng ký cán bộ</h2>
+          <p class="auth-note">Tạo tài khoản mới kèm khóa ML-DSA để ký tài liệu.</p>
+          <div class="form-group">
+            <label for="new-user-id">Tên đăng nhập</label>
+            <input type="text" id="new-user-id" placeholder="vd: officer_001">
+          </div>
+          <div class="form-group">
+            <label for="new-user-name">Họ và tên</label>
+            <input type="text" id="new-user-name">
+          </div>
+          <div class="form-group">
+            <label for="new-user-email">Email</label>
+            <input type="text" id="new-user-email">
+          </div>
+          <div class="form-group">
+            <label for="new-user-department">Phòng ban</label>
+            <input type="text" id="new-user-department">
+          </div>
+          <div class="form-group">
+            <label for="new-user-region">Mã vùng (tùy chọn)</label>
+            <input type="text" id="new-user-region" placeholder="VN-SG">
+          </div>
+          <div class="form-group">
+            <label for="new-user-password">Mật khẩu</label>
+            <input type="password" id="new-user-password">
+          </div>
+          <div class="form-group">
+            <label for="new-user-st">Tỉnh/Thành (ST)</label>
+            <input type="text" id="new-user-st" placeholder="HCM">
+          </div>
+          <div class="form-group">
+            <label for="new-user-l">Quận/Huyện (L)</label>
+            <input type="text" id="new-user-l" placeholder="Q12">
+          </div>
+          <div class="form-group">
+            <label for="new-user-ou">Đơn vị (OU)</label>
+            <input type="text" id="new-user-ou" placeholder="CA Q12">
+          </div>
+          <button class="btn" onclick="createUser()">Đăng ký</button>
+          <div id="user-result"></div>
+        </div>
       </div>
     </div>
 
-    <!-- QR Verification -->
-    <div id="qr-verify" class="section" style="display:none;">
+    <div id="sign-doc" class="section">
       <div class="card">
-        <h2></h2>Xác Thực Tài Liệu QR Từ Công Dân</h2>
-        <div class="info">Xem danh sách các tài liệu QR được quét từ công dân và xác thực trước khi chấp nhận.</div>
-        <div class="form-group">
-          <label>Officer ID:</label>
-          <input type="text" id="qr-verify-officer-id" placeholder="officer_001">
-        </div>
-        <button onclick="loadPendingQRScanRequests()">Tải Yêu Cầu Chờ Duyệt</button>
-        <div id="pending-qr-requests-list" style="margin-top: 20px;"></div>
+        <h2>Yêu cầu ký tài liệu</h2>
+        <p class="subtitle" id="sign-doc-user-hint">Đăng nhập để xem yêu cầu gửi đến tài khoản của bạn.</p>
+        <button class="btn" onclick="loadPendingDocumentRequests()">Tải yêu cầu chờ duyệt</button>
+        <div id="pending-doc-requests-list"></div>
       </div>
     </div>
 
-    <!-- User Management -->
-    <div id="users" class="section" style="display:none;">
+    <div id="documents" class="section">
       <div class="card">
-        <h2>Tạo Tài Khoản</h2>
-        <div class="form-group">
-          <label>ID Người Dùng:</label>
-          <input type="text" id="new-user-id" placeholder="officer_001">
-        </div>
-        <div class="form-group">
-          <label>Tên:</label>
-          <input type="text" id="new-user-name" placeholder="Nguyễn Văn A">
-        </div>
-        <div class="form-group">
-          <label>Email:</label>
-          <input type="text" id="new-user-email" placeholder="user@example.com">
-        </div>
-        <div class="form-group">
-          <label>Phòng Ban:</label>
-          <input type="text" id="new-user-department" placeholder="Department / Division">
-        </div>
-        <div class="form-group">
-          <label>Vùng:</label>
-          <input type="text" id="new-user-region" placeholder="VN-SG">
-        </div>
-        <div class="form-group">
-          <label>Mật Khẩu:</label>
-          <input type="password" id="new-user-password">
-        </div>
-        <div class="form-group">
-          <label>ST (State/Province):</label>
-          <input type="text" id="new-user-st" placeholder="HCM">
-        </div>
-        <div class="form-group">
-          <label>L (Locality):</label>
-          <input type="text" id="new-user-l" placeholder="Q12">
-        </div>
-        <div class="form-group">
-          <label>OU (Organizational Unit):</label>
-          <input type="text" id="new-user-ou" placeholder="CA Q12">
-        </div>
-        <button onclick="createUser()">Tạo Tài Khoản</button>
-        <div id="user-result" style="margin-top: 20px;"></div>
+        <h2>Tài liệu đã ký</h2>
+        <button class="btn" onclick="loadSignedDocuments()">Tải danh sách</button>
+        <div id="documents-list"></div>
       </div>
     </div>
 
-    <!-- Sign Document -->
-    <div id="sign-doc" class="section" style="display:none;">
+    <div id="keys" class="section">
       <div class="card">
-        <h2>Yêu Cầu Ký Tài Liệu</h2>
-        <div class="form-group">
-          <label>Officer ID:</label>
-          <input type="text" id="pending-doc-officer-id" placeholder="officer_001">
-        </div>
-        <button onclick="loadPendingDocumentRequests()">Tải Yêu Cầu Chờ Duyệt</button>
-        <div id="pending-doc-requests-list" style="margin-top: 20px;"></div>
-      </div>
-    </div>
-
-    <!-- Signed Documents -->
-    <div id="documents" class="section" style="display:none;">
-      <div class="card">
-        <h2>Tài Liệu Đã Ký</h2>
-        <div class="form-group">
-          <label>Officer ID (tùy chọn):</label>
-          <input type="text" id="doc-filter-officer-id" placeholder="officer_001">
-        </div>
-        <button onclick="loadSignedDocuments()">Tải Danh Sách Tài Liệu</button>
-        <div id="documents-list" style="margin-top: 20px;"></div>
-      </div>
-    </div>
-
-    <!-- Certificate Management -->
-    <div id="keys" class="section" style="display:none;">
-      <div class="card">
-        <h2>Chứng Chỉ PKI Của Officer</h2>
-        <div class="form-group">
-          <label>ID Officer:</label>
-          <input type="text" id="cert-officer-id" placeholder="officer_001">
-        </div>
-        <button onclick="loadOfficerCertificates()">Tải Chứng Chỉ PKI</button>
-        <div id="keys-list" style="margin-top: 20px;"></div>
+        <h2>Chứng chỉ PKI của tôi</h2>
+        <button class="btn" onclick="loadOfficerCertificates()">Tải chứng chỉ</button>
+        <div id="keys-list"></div>
       </div>
 
       <div class="card" style="margin-top: 20px;">
-        <h2>Yêu Cầu Cấp Lại Chứng Chỉ (Renewal)</h2>
-        <button onclick="requestCertRenewal()">Yêu Cầu Cấp Lại Cert</button>
-        <div id="reissue-result" style="margin-top: 20px;"></div>
+        <h2>Yêu cầu cấp lại chứng chỉ</h2>
+        <button class="btn secondary" onclick="requestCertRenewal()">Gửi yêu cầu gia hạn</button>
+        <div id="reissue-result"></div>
       </div>
 
       <div class="card" style="margin-top: 20px;">
-        <h2>Lịch Sử Chứng Chỉ</h2>
-        <button onclick="renderCertificatesAsHistory()">Tải Danh Sách</button>
-        <div id="requests-list" style="margin-top: 20px;"></div>
+        <h2>Lịch sử chứng chỉ</h2>
+        <button class="btn secondary" onclick="renderCertificatesAsHistory()">Tải danh sách</button>
+        <div id="requests-list"></div>
       </div>
     </div>
   </div>
 
+  <script src="portal-api.js"></script>
   <script>
-    const API_URL = `${window.location.protocol}//${window.location.hostname}:8080`;
-    let sessionId = localStorage.getItem('sessionId') || null;
+    let sessionId = getSessionToken() || null;
     const PRIVATE_KEY_STORE_PREFIX = 'officer_private_key_pem:';
 
-    function authHeaders() {
-      const headers = { 'Content-Type': 'application/json' };
-      if (sessionId) headers.Authorization = `Bearer ${sessionId}`;
-      // Also include user identity headers so LOCAL_MODE servers accept the request
-      const userId = localStorage.getItem('user_id');
-      const userType = localStorage.getItem('user_type');
-      if (userId) headers['X-User-ID'] = userId;
-      if (userType) headers['X-User-Type'] = userType;
-      return headers;
+    function syncSession() {
+      sessionId = getSessionToken();
+    }
+
+    function officerAuthHeaders() {
+      syncSession();
+      return buildAuthHeaders(true);
     }
 
     function showSection(section) {
-      document.querySelectorAll('.section').forEach(s => (s.style.display = 'none'));
-      const elementId = { dashboard: 'dashboard', users: 'users', 'qr-verify': 'qr-verify', 'sign-doc': 'sign-doc', keys: 'keys', documents: 'documents', login: 'login' }[section];
-      if (elementId) document.getElementById(elementId).style.display = 'block';
-      if (section === 'qr-verify') loadPendingQRScanRequests();
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      const elementId = { dashboard: 'dashboard', auth: 'auth', 'sign-doc': 'sign-doc', keys: 'keys', documents: 'documents' }[section];
+      if (elementId) document.getElementById(elementId).classList.add('active');
       if (section === 'sign-doc') loadPendingDocumentRequests();
       if (section === 'documents') loadSignedDocuments();
+      if (section === 'keys') loadOfficerCertificates();
+    }
+
+    function showAuthTab(tab) {
+      document.getElementById('auth-login-panel').style.display = tab === 'login' ? 'block' : 'none';
+      document.getElementById('auth-register-panel').style.display = tab === 'register' ? 'block' : 'none';
+      document.getElementById('auth-tab-login').classList.toggle('active', tab === 'login');
+      document.getElementById('auth-tab-register').classList.toggle('active', tab === 'register');
+    }
+
+    async function fetchOfficerDisplayName(officerId) {
+      if (!sessionId || !officerId) return officerId;
+      try {
+        const resp = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}`, { headers: officerAuthHeaders() });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.officer && data.officer.name) {
+          localStorage.setItem('display_name', data.officer.name);
+          return data.officer.name;
+        }
+      } catch (_) { /* ignore */ }
+      return localStorage.getItem('display_name') || officerId;
     }
 
     function updateAuthUI() {
-      const user = localStorage.getItem('user_id');
-      const loginResult = document.getElementById('login-result');
-      const navLogin = document.getElementById('nav-login');
+      const username = localStorage.getItem('user_id') || '';
+      const displayName = localStorage.getItem('display_name') || username;
+      const navAuth = document.getElementById('nav-auth');
       const navLogout = document.getElementById('nav-logout');
+      const headerUser = document.getElementById('header-user');
+      const hint = document.getElementById('sign-doc-user-hint');
       if (sessionId) {
-        if (loginResult) loginResult.innerHTML = `<div class="success">Đăng nhập: ${user}</div>`;
-        if (navLogin) navLogin.style.display = 'none';
-        if (navLogout) navLogout.style.display = 'inline';
+        if (navAuth) navAuth.style.display = 'none';
+        if (navLogout) navLogout.style.display = 'inline-flex';
+        if (headerUser) {
+          headerUser.style.display = 'inline-flex';
+          headerUser.innerHTML = `<span>Xin chào,</span><strong>${displayName}</strong>`;
+        }
+        if (hint) hint.textContent = `Đang xem yêu cầu cho tài khoản: ${username}`;
       } else {
-        if (loginResult) loginResult.innerHTML = '<div class="info">Chưa đăng nhập</div>';
-        if (navLogin) navLogin.style.display = 'inline';
+        if (navAuth) navAuth.style.display = 'inline-flex';
         if (navLogout) navLogout.style.display = 'none';
+        if (headerUser) headerUser.style.display = 'none';
+        if (hint) hint.textContent = 'Đăng nhập để xem yêu cầu gửi đến tài khoản của bạn.';
       }
     }
 
     function officerLogout() {
       sessionId = null;
-      localStorage.removeItem('sessionId');
-      localStorage.removeItem('user_id');
-      localStorage.removeItem('user_type');
+      clearSession();
       updateAuthUI();
-      showSection('login');
+      showSection('auth');
+      showAuthTab('login');
     }
 
     async function officerLogin() {
       const officerId = document.getElementById('login-officer-id').value.trim();
       const password = document.getElementById('login-officer-password').value.trim();
-      if (!officerId || !password) return document.getElementById('login-result').innerHTML = `<div class="error">Vui lòng nhập officer_id và mật khẩu</div>`;
+      if (!officerId || !password) return document.getElementById('login-result').innerHTML = `<div class="alert error">Vui lòng nhập tên đăng nhập và mật khẩu</div>`;
       try {
-        const resp = await fetch(`${API_URL}/api/storage/officers/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ officer_id: officerId, password }) });
+        const resp = await apiFetch('/api/storage/officers/login', { method: 'POST', body: { officer_id: officerId, password } });
         const data = await resp.json().catch(() => ({}));
-        if (!resp.ok || !data.token) return document.getElementById('login-result').innerHTML = `<div class="error">Lỗi: ${data.error || 'Không thể đăng nhập'}</div>`;
-        sessionId = data.token;
-        localStorage.setItem('sessionId', sessionId);
-        localStorage.setItem('user_id', data.user_id || officerId);
+        if (!resp.ok || !data.token) {
+          clearSession();
+          sessionId = null;
+          return document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Không thể đăng nhập'}. Demo: officer_demo / demo12345</div>`;
+        }
+        sessionId = saveSession(data, data.user_id || officerId, null);
         localStorage.setItem('user_type', 'officer');
+        await fetchOfficerDisplayName(data.user_id || officerId);
+        document.getElementById('login-result').innerHTML = `<div class="alert success">Đăng nhập thành công.</div>`;
         updateAuthUI();
+        showSection('dashboard');
       } catch (e) {
-        document.getElementById('login-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        clearSession();
+        sessionId = null;
+        document.getElementById('login-result').innerHTML = `<div class="alert error">Không kết nối API (${API_URL}). ${e.message}</div>`;
       }
     }
 
@@ -274,13 +257,15 @@
         const data = await response.json().catch(() => ({}));
         const result = document.getElementById('user-result');
         if (response.ok) {
-          result.innerHTML = `<div class="success">Officer ${userId} đã được tạo</div>`;
-          document.getElementById('new-user-password').value = '';
+          result.innerHTML = `<div class="alert success">Đăng ký thành công. Bạn có thể đăng nhập ngay.</div>`;
+          localStorage.setItem('display_name', name);
+          showAuthTab('login');
+          document.getElementById('login-officer-id').value = userId;
         } else {
-          result.innerHTML = `<div class="error">Lỗi: ${data.error || 'Không thể tạo officer'}</div>`;
+          result.innerHTML = `<div class="alert error">Lỗi: ${data.error || 'Không thể tạo officer'}</div>`;
         }
       } catch (e) {
-        document.getElementById('user-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        document.getElementById('user-result').innerHTML = `<div class="alert error">Lỗi: ${e.message}</div>`;
       }
     }
 
@@ -291,7 +276,7 @@
     async function downloadDocumentRequest(requestId) {
       if (!sessionId) return;
       try {
-        const response = await fetch(`${API_URL}/api/storage/document-sign-requests/${requestId}`, { headers: authHeaders() });
+        const response = await fetch(`${API_URL}/api/storage/document-sign-requests/${requestId}`, { headers: officerAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Không thể tải yêu cầu ký');
         const requestItem = data.request || {};
@@ -312,8 +297,13 @@
 
     async function signDocumentRequest(requestId) {
       if (!sessionId) return;
-      const officerId = localStorage.getItem('user_id') || document.getElementById('pending-doc-officer-id').value.trim() || 'officer_001';
+      const officerId = localStorage.getItem('user_id');
+      if (!officerId) {
+        document.getElementById('pending-doc-requests-list').innerHTML = '<div class="alert error">Vui lòng đăng nhập để xem yêu cầu</div>';
+        return;
+      }
       const privateKeyPem = getOfficerPrivateKey(officerId);
+      let activeCertPem = null;
       if (!privateKeyPem) {
         document.getElementById('pending-doc-requests-list').innerHTML = '<div class="error">Không tìm thấy private key local cho officer này.</div>';
         return;
@@ -321,10 +311,12 @@
 
       // Early UI guard: officer must have at least one active certificate.
       try {
-        const certResp = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/certificates`, { headers: authHeaders() });
+        const certResp = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/certificates`, { headers: officerAuthHeaders() });
         const certData = await certResp.json().catch(() => ({}));
         if (!certResp.ok) throw new Error(certData.error || 'Không thể kiểm tra chứng chỉ officer');
-        const hasActiveCert = (certData.certificates || []).some(cert => cert.is_active === true);
+          const activeCert = (certData.certificates || []).find(cert => cert.is_active === true);
+          activeCertPem = activeCert && activeCert.cert_pem ? activeCert.cert_pem : null;
+          const hasActiveCert = !!activeCertPem;
         if (!hasActiveCert) {
           document.getElementById('pending-doc-requests-list').innerHTML = '<div class="error">Officer chưa có chứng chỉ còn hiệu lực, không thể ký tài liệu.</div>';
           return;
@@ -335,7 +327,7 @@
       }
 
       try {
-        const requestResp = await fetch(`${API_URL}/api/storage/document-sign-requests/${requestId}`, { headers: authHeaders() });
+        const requestResp = await fetch(`${API_URL}/api/storage/document-sign-requests/${requestId}`, { headers: officerAuthHeaders() });
         const requestData = await requestResp.json().catch(() => ({}));
         if (!requestResp.ok) throw new Error(requestData.error || 'Không thể tải dữ liệu yêu cầu');
         const requestItem = requestData.request || {};
@@ -354,16 +346,32 @@
         // Do not send signer identity from the client; server will use authenticated session.
         const completeResp = await fetch(`${API_URL}/api/storage/document-sign-requests/${requestId}/complete`, {
           method: 'POST',
-          headers: authHeaders(),
+          headers: officerAuthHeaders(),
           body: JSON.stringify({
             signature: signData.signature,
             signature_algorithm: signData.signature_algorithm,
+              private_key_pem: privateKeyPem,
+              cert_pem: activeCertPem,
           })
         });
         const completeData = await completeResp.json().catch(() => ({}));
         if (!completeResp.ok) throw new Error(completeData.error || 'Không thể cập nhật trạng thái yêu cầu');
 
-        document.getElementById('pending-doc-requests-list').innerHTML = `<div class="success">Đã ký và hoàn tất yêu cầu ${requestId}<pre>${JSON.stringify({ ...signData, ...completeData }, null, 2)}</pre></div>`;
+        let successHtml = `<div class="success">Đã ký và hoàn tất yêu cầu ${requestId}.</div>`;
+
+        if (completeData.qr_image_base64) {
+            const qrDataUrl = 'data:image/png;base64,' + completeData.qr_image_base64;
+            successHtml += `
+                <div style="margin-top: 20px; text-align: center; border-top: 1px solid #ccc; padding-top: 15px;">
+                    <h4>Mã QR đã được tạo</h4>
+                    <img src="${qrDataUrl}" alt="QR Code" style="max-width: 200px; border: 1px solid #ccc; padding: 5px; margin: 10px 0;">
+                    <br>
+                    <a href="${qrDataUrl}" download="qr-${requestId}.png" style="display: inline-block; background: #c53030; color: white; padding: 8px 12px; border-radius: 4px; text-decoration: none; margin-top: 10px;">Tải về mã QR</a>
+                </div>
+            `;
+        }
+        document.getElementById('pending-doc-requests-list').innerHTML = successHtml;
+
         loadPendingDocumentRequests();
         loadSignedDocuments();
         loadOfficerCertificates();
@@ -373,19 +381,22 @@
     }
 
     async function loadPendingDocumentRequests() {
-      if (!sessionId) return (document.getElementById('pending-doc-requests-list').innerHTML = `<div class="error">Vui lòng đăng nhập để xem yêu cầu</div>`);
+      if (!sessionId) return (document.getElementById('pending-doc-requests-list').innerHTML = `<div class="alert error">Vui lòng đăng nhập để xem yêu cầu</div>`);
       try {
-        const officerId = localStorage.getItem('user_id') || document.getElementById('pending-doc-officer-id').value.trim() || 'officer_001';
-        document.getElementById('pending-doc-officer-id').value = officerId;
-        const response = await fetch(`${API_URL}/api/storage/document-sign-requests?status=pending`, { headers: authHeaders() });
+        const officerId = localStorage.getItem('user_id');
+        if (!officerId) {
+          document.getElementById('pending-doc-requests-list').innerHTML = '<div class="alert error">Vui lòng đăng nhập để xem yêu cầu</div>';
+          return;
+        }
+        const response = await fetch(`${API_URL}/api/storage/document-sign-requests?status=pending`, { headers: officerAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Không thể tải yêu cầu ký');
-        let html = '<table><tr><th>Request ID</th><th>Doc ID</th><th>Citizen</th><th>Officer Giao</th><th>Tiêu Đề</th><th>Trạng Thái</th><th>Ngày Tạo</th><th>Hành Động</th></tr>';
+        let html = '<table><tr><th>Mã yêu cầu</th><th>Mã tài liệu</th><th>Công dân</th><th>Cán bộ phụ trách</th><th>Tiêu đề</th><th>Trạng thái</th><th>Ngày tạo</th><th>Hành động</th></tr>';
         (data.requests || []).forEach(req => {
-          html += `<tr><td>${req.request_id}</td><td>${req.doc_id}</td><td>${req.citizen_id}</td><td>${req.officer_id || 'N/A'}</td><td>${req.doc_title || 'N/A'}</td><td>${req.status || 'N/A'}</td><td>${req.created_at || 'N/A'}</td><td><button onclick="downloadDocumentRequest('${req.request_id}')">Tải Xem</button> <button onclick="signDocumentRequest('${req.request_id}')">Xác Nhận & Ký</button></td></tr>`;
+          html += `<tr><td>${req.request_id}</td><td>${req.doc_id}</td><td>${req.citizen_id}</td><td>${req.officer_id || '—'}</td><td>${req.doc_title || '—'}</td><td>${req.status || '—'}</td><td>${req.created_at || '—'}</td><td><button class="btn secondary" onclick="downloadDocumentRequest('${req.request_id}')">Tải xem</button> <button class="btn" onclick="signDocumentRequest('${req.request_id}')">Ký</button></td></tr>`;
         });
         html += '</table>';
-        if (!data.requests || data.requests.length === 0) html = '<div class="info">Không có yêu cầu ký đang chờ.</div>';
+        if (!data.requests || data.requests.length === 0) html = '<div class="alert info">Không có yêu cầu ký đang chờ.</div>';
         document.getElementById('pending-doc-requests-list').innerHTML = html;
       } catch (e) {
         document.getElementById('pending-doc-requests-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
@@ -393,20 +404,20 @@
     }
 
     async function loadSignedDocuments() {
-      if (!sessionId) return (document.getElementById('documents-list').innerHTML = `<div class="error">Vui lòng đăng nhập để xem tài liệu</div>`);
+      if (!sessionId) return (document.getElementById('documents-list').innerHTML = `<div class="alert error">Vui lòng đăng nhập để xem tài liệu</div>`);
       try {
-        const officerId = localStorage.getItem('user_id') || document.getElementById('doc-filter-officer-id').value.trim() || 'officer_001';
-        document.getElementById('doc-filter-officer-id').value = officerId;
-        const response = await fetch(`${API_URL}/api/storage/documents?status=signed&signed_by=${encodeURIComponent(officerId)}`, { headers: authHeaders() });
+        const officerId = localStorage.getItem('user_id');
+        if (!officerId) return (document.getElementById('documents-list').innerHTML = `<div class="alert error">Vui lòng đăng nhập</div>`);
+        const response = await fetch(`${API_URL}/api/storage/documents?status=signed&signed_by=${encodeURIComponent(officerId)}`, { headers: officerAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách tài liệu');
         const docs = (data.documents || []);
-        let html = '<table><tr><th>Doc ID</th><th>Tiêu Đề</th><th>Trạng Thái</th><th>Officer Ký</th><th>Ngày Tạo</th><th>Ghi Chú</th></tr>';
+        let html = '<table><tr><th>Mã tài liệu</th><th>Tiêu đề</th><th>Trạng thái</th><th>Người ký</th><th>Ngày tạo</th></tr>';
         docs.forEach(doc => {
-          html += `<tr><td>${doc.doc_id}</td><td>${doc.doc_title || 'N/A'}</td><td>${doc.status || 'N/A'}</td><td>${doc.signed_by || 'N/A'}</td><td>${doc.created_at || 'N/A'}</td><td>Đã ký</td></tr>`;
+          html += `<tr><td>${doc.doc_id}</td><td>${doc.doc_title || '—'}</td><td>${doc.status || '—'}</td><td>${doc.signed_by || '—'}</td><td>${doc.created_at || '—'}</td></tr>`;
         });
         html += '</table>';
-        if (docs.length === 0) html = '<div class="info">Chưa có tài liệu nào officer này đã ký.</div>';
+        if (docs.length === 0) html = '<div class="alert info">Chưa có tài liệu nào bạn đã ký.</div>';
         document.getElementById('documents-list').innerHTML = html;
       } catch (e) {
         document.getElementById('documents-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
@@ -414,22 +425,21 @@
     }
 
     async function loadOfficerCertificates() {
-      if (!sessionId) return (document.getElementById('keys-list').innerHTML = `<div class="error">Vui lòng đăng nhập để xem chứng chỉ</div>`);
+      if (!sessionId) return (document.getElementById('keys-list').innerHTML = `<div class="alert error">Vui lòng đăng nhập để xem chứng chỉ</div>`);
       try {
-        const officerId = localStorage.getItem('user_id') || document.getElementById('cert-officer-id').value.trim() || 'officer_001';
-        document.getElementById('cert-officer-id').value = officerId;
-        // Use storage service endpoint to get all certificates (active and revoked)
-        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/certificates`, { headers: authHeaders() });
+        const officerId = localStorage.getItem('user_id');
+        if (!officerId) return (document.getElementById('keys-list').innerHTML = `<div class="alert error">Vui lòng đăng nhập</div>`);
+        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/certificates`, { headers: officerAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách chứng chỉ');
         const certs = data.certificates || [];
-        let html = '<table><tr><th>Cert ID</th><th>Officer ID</th><th>Trạng Thái</th><th>Hiệu Lực Đến</th><th>Tạo Lúc</th><th>Hết Hạn Lúc</th><th>Tải Cert</th></tr>';
+        let html = '<table><tr><th>Mã chứng chỉ</th><th>Trạng thái</th><th>Hết hạn</th><th>Tạo lúc</th><th>Thu hồi lúc</th><th>Tải</th></tr>';
         certs.forEach(cert => { 
-          const statusDisplay = cert.is_active ? '<span style="color:green; font-weight:bold;">Còn hiệu lực</span>' : '<span style="color:red; font-weight:bold;">Hết hạn</span>';
-          html += `<tr><td>${cert.cert_id}</td><td>${cert.officer_id || 'N/A'}</td><td>${statusDisplay}</td><td>${cert.expires_at || 'N/A'}</td><td>${cert.created_at || 'N/A'}</td><td>${cert.revoked_at || '—'}</td><td>${cert.is_active ? `<button onclick="downloadCertificate('${cert.cert_id}')">Tải Cert</button>` : 'N/A'}</td></tr>`; 
+          const statusDisplay = cert.is_active ? '<span style="color:green;font-weight:600">Còn hiệu lực</span>' : '<span style="color:#dc2626;font-weight:600">Hết hạn</span>';
+          html += `<tr><td>${cert.cert_id}</td><td>${statusDisplay}</td><td>${cert.expires_at || '—'}</td><td>${cert.created_at || '—'}</td><td>${cert.revoked_at || '—'}</td><td>${cert.is_active ? `<button class="btn secondary" onclick="downloadCertificate('${cert.cert_id}')">Tải</button>` : '—'}</td></tr>`; 
         });
         html += '</table>';
-        if (certs.length === 0) html = '<div class="info">Chưa có chứng chỉ nào cho officer này.</div>';
+        if (certs.length === 0) html = '<div class="alert info">Chưa có chứng chỉ nào.</div>';
         document.getElementById('keys-list').innerHTML = html;
       } catch (e) {
         document.getElementById('keys-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
@@ -449,7 +459,7 @@
     async function downloadCertificate(certId) {
       if (!sessionId) return (document.getElementById('keys-list').innerHTML = `<div class="error">Vui lòng đăng nhập để tải chứng chỉ</div>`);
       try {
-        const response = await fetch(`${API_URL}/api/pki/certificates/${certId}`, { headers: authHeaders() });
+        const response = await fetch(`${API_URL}/api/pki/certificates/${certId}`, { headers: officerAuthHeaders() });
         const pem = await response.text();
         if (!response.ok) throw new Error(pem || 'Không thể tải chứng chỉ');
         downloadPem(`${certId}.pem`, pem);
@@ -484,7 +494,7 @@
         // Submit renewal request to storage service (subject comes from session)
         const response = await fetch(`${API_URL}/api/storage/officer-cert-requests/renew`, { 
           method: 'POST', 
-          headers: authHeaders(), 
+          headers: officerAuthHeaders(), 
           body: JSON.stringify({ 
             officer_id: officerId,
             public_key_pem: keypairData.public_key_pem,
@@ -507,46 +517,29 @@
       try {
         const officerId = localStorage.getItem('user_id') || 'officer_001';
         // Use storage service endpoint to get all certificates (active and revoked)
-        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/certificates`, { headers: authHeaders() });
+        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/certificates`, { headers: officerAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         const certs = data.certificates || [];
-        let html = '<table><tr><th>Cert ID</th><th>Officer ID</th><th>Trạng Thái</th><th>Hiệu Lực Đến</th><th>Tạo Lúc</th><th>Hết Hạn Lúc</th></tr>';
+        let html = '<table><tr><th>Mã chứng chỉ</th><th>Trạng thái</th><th>Hết hạn</th><th>Tạo lúc</th><th>Thu hồi lúc</th></tr>';
         certs.forEach(cert => { 
-          const statusDisplay = cert.is_active ? '<span style="color:green; font-weight:bold;">Còn hiệu lực</span>' : '<span style="color:red; font-weight:bold;">Hết hạn</span>';
-          html += `<tr><td>${cert.cert_id}</td><td>${cert.officer_id || 'N/A'}</td><td>${statusDisplay}</td><td>${cert.expires_at || 'N/A'}</td><td>${cert.created_at || 'N/A'}</td><td>${cert.revoked_at || '—'}</td></tr>`; 
+          const statusDisplay = cert.is_active ? '<span style="color:green;font-weight:600">Còn hiệu lực</span>' : '<span style="color:#dc2626;font-weight:600">Hết hạn</span>';
+          html += `<tr><td>${cert.cert_id}</td><td>${statusDisplay}</td><td>${cert.expires_at || '—'}</td><td>${cert.created_at || '—'}</td><td>${cert.revoked_at || '—'}</td></tr>`; 
         });
         html += '</table>';
-        if (!certs.length) html = '<div class="info">Chưa có certificate nào.</div>';
+        if (!certs.length) html = '<div class="alert info">Chưa có chứng chỉ nào.</div>';
         document.getElementById('requests-list').innerHTML = html;
       } catch (e) {
         document.getElementById('requests-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
       }
     }
-    async function loadPendingQRScanRequests() {
-      if (!sessionId) return (document.getElementById('pending-qr-requests-list').innerHTML = `<div class="error">Vui lòng đăng nhập để xem yêu cầu</div>`);
-      try {
-        const officerId = localStorage.getItem('user_id') || document.getElementById('qr-verify-officer-id').value.trim() || 'officer_001';
-        document.getElementById('qr-verify-officer-id').value = officerId;
-        const response = await fetch(`${API_URL}/api/storage/qr-scan-requests?status=pending&officer_id=${encodeURIComponent(officerId)}`, { headers: authHeaders() });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'Không thể tải yêu cầu QR');
-        let html = '<table><tr><th>Request ID</th><th>Citizen ID</th><th>Officer Giao</th><th>Tiêu Đề</th><th>Trạng Thái</th><th>Ngày Tạo</th></tr>';
-        (data.requests || []).forEach(req => {
-          html += `<tr><td>${req.request_id}</td><td>${req.citizen_id}</td><td>${req.officer_id || 'N/A'}</td><td>${req.title || 'N/A'}</td><td>${req.status || 'N/A'}</td><td>${req.created_at || 'N/A'}</td></tr>`;
-        });
-        html += '</table>';
-        if (!data.requests || data.requests.length === 0) html = '<div class="info">Không có yêu cầu QR đang chờ.</div>';
-        document.getElementById('pending-qr-requests-list').innerHTML = html;
-      } catch (e) {
-        document.getElementById('pending-qr-requests-list').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
-      }
-    }
     updateAuthUI();
-    showSection('login');
-    loadPendingDocumentRequests();
-    loadSignedDocuments();
-    loadOfficerCertificates();
-    renderCertificatesAsHistory();
+    if (sessionId) {
+      fetchOfficerDisplayName(localStorage.getItem('user_id') || '').then(updateAuthUI);
+      showSection('dashboard');
+    } else {
+      showSection('auth');
+      showAuthTab('login');
+    }
   </script>
 </body>
 </html>

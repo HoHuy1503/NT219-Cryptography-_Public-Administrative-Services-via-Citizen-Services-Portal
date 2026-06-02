@@ -4,167 +4,134 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cổng Dịch Vụ Bên Thứ Ba</title>
+  <link rel="stylesheet" href="shared-portal.css">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    header { background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); color: white; padding: 30px; margin-bottom: 30px; border-radius: 8px; }
-    header h1 { font-size: 2em; margin-bottom: 10px; }
-    header p { opacity: 0.9; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .card h2 { color: #d35400; margin-bottom: 15px; }
-    button { background: #e67e22; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1em; }
-    button:hover { background: #d35400; }
-    .form-group { margin-bottom: 15px; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
-    input[type="text"], input[type="email"], textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em; }
-    textarea { resize: vertical; min-height: 100px; }
-    .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    .info { background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 4px; margin: 10px 0; }
-    nav { background: #333; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-    nav a { color: white; text-decoration: none; margin-right: 20px; }
-    nav a:hover { color: #e67e22; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-    th { background: #f5f5f5; font-weight: bold; }
-    tr:hover { background: #f9f9f9; }
-    .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+    :root { --accent: #e67e22; --header-gradient: linear-gradient(135deg, #e67e22, #d35400); }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: 600; }
     .badge.pending { background: #fff3cd; color: #856404; }
     .badge.approved { background: #d4edda; color: #155724; }
     .badge.denied { background: #f8d7da; color: #721c24; }
+    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+    .modal-content { background-color: #fefefe; margin: 10% auto; padding: 24px; border: 1px solid var(--border); width: 90%; max-width: 700px; border-radius: var(--radius); box-shadow: var(--shadow); }
+    .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+    .close:hover { color: #111; }
   </style>
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>🏢 Cổng Dịch Vụ Bên Thứ Ba</h1>
-      <p>Yêu cầu truy cập tài liệu công dân, quản lý tích hợp</p>
+    <header class="app-header">
+      <div>
+        <h1>Cổng Dịch Vụ Bên Thứ Ba</h1>
+        <p>Xác thực tài liệu công dân tại quầy</p>
+      </div>
+      <div id="header-user" class="user-badge" style="display:none"></div>
     </header>
 
-    <nav>
-      <a href="#dashboard" onclick="showSection('dashboard')">Trang Chủ</a>
-      <a id="nav-login" href="#login" onclick="showSection('login')">Đăng Nhập</a>
-      <a id="nav-logout" href="#" onclick="thirdpartyLogout()" style="display:none; margin-left:10px;">Đăng Xuất</a>
-      <a href="#shared" onclick="showSection('shared')">Tài Liệu Được Chia Sẻ</a>
-      <a href="#register" onclick="showSection('register')">Đăng Ký</a>
-      <a href="#verify" onclick="showSection('verify')">Xác Minh Cert</a>
+    <nav class="app-nav">
+      <a href="#dashboard" onclick="showSection('dashboard'); loadVerificationRequests();">Yêu cầu xác thực</a>
+      <span class="nav-spacer"></span>
+      <a id="nav-auth" href="#auth" onclick="showSection('auth')">Tài khoản</a>
+      <a id="nav-logout" href="#" onclick="thirdpartyLogout()" style="display:none">Đăng xuất</a>
     </nav>
 
-    <!-- Dashboard -->
-    <div id="dashboard" class="section">
-      <div class="grid">
-        <div class="card">
-          <h2>📄 Tài Liệu Được Chia Sẻ</h2>
-          <p>Xem tài liệu công dân được chia sẻ với cơ quan của tôi.</p>
-          <button onclick="showSection('shared')">Xem →</button>
+    <div id="dashboard" class="section active">
+      <div class="card">
+        <h2>Yêu cầu xác thực chờ duyệt</h2>
+        <p class="subtitle">Các yêu cầu từ công dân đang chờ bạn quét QR để xác thực tại quầy.</p>
+        <button class="btn" onclick="loadVerificationRequests()">Tải lại danh sách</button>
+        <div id="verify-requests-list"></div>
+      </div>
+    </div>
+
+    <div id="auth" class="section">
+      <div class="auth-layout">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" id="auth-tab-login" onclick="showAuthTab('login')">Đăng nhập</button>
+          <button type="button" class="auth-tab" id="auth-tab-register" onclick="showAuthTab('register')">Đăng ký</button>
         </div>
-        <div class="card">
-          <h2>✅ Xác Minh Với PKI</h2>
-          <p>Khi công dân yêu cầu bên thứ ba xác nhận, truy vấn PKI lấy cert theo tài liệu để verify.</p>
-          <button onclick="showSection('verify')">Xác Minh →</button>
+        <div class="card" id="auth-login-panel">
+          <h2>Đăng nhập bên thứ ba</h2>
+          <div class="form-group">
+            <label for="login-thirdparty-id">Tên đăng nhập</label>
+            <input type="text" id="login-thirdparty-id" autocomplete="username" placeholder="thirdparty_demo" value="thirdparty_demo">
+          </div>
+          <div class="form-group">
+            <label for="login-thirdparty-password">Mật khẩu</label>
+            <input type="password" id="login-thirdparty-password" autocomplete="current-password" value="demo12345">
+          </div>
+          <button class="btn" onclick="loginThirdParty()">Đăng nhập</button>
+          <div id="login-result"></div>
         </div>
-        <div class="card">
-          <h2>📄 Tài Liệu Được Chia Sẻ</h2>
-          <p>Xem tài liệu công dân được chia sẻ với cơ quan của tôi.</p>
-          <button onclick="showSection('shared')">Xem →</button>
-        </div>
-        <div class="card">
-          <h2>✅ Xác Minh Với PKI</h2>
-          <p>Khi công dân yêu cầu bên thứ ba xác nhận, truy vấn PKI lấy cert theo tài liệu để verify.</p>
-          <button onclick="showSection('verify')">Xác Minh →</button>
+        <div class="card" id="auth-register-panel" style="display:none;">
+          <h2>Đăng ký bên thứ ba</h2>
+          <p class="auth-note">Tạo tài khoản tổ chức để nhận yêu cầu xác thực từ công dân.</p>
+          <div class="form-group">
+            <label for="reg-thirdparty-id">Tên đăng nhập</label>
+            <input type="text" id="reg-thirdparty-id" placeholder="vd: nganhang_abc">
+          </div>
+          <div class="form-group">
+            <label for="reg-thirdparty-org">Tên tổ chức</label>
+            <input type="text" id="reg-thirdparty-org">
+          </div>
+          <div class="form-group">
+            <label for="reg-thirdparty-email">Email liên hệ</label>
+            <input type="email" id="reg-thirdparty-email">
+          </div>
+          <div class="form-group">
+            <label for="reg-thirdparty-contact">Người liên hệ</label>
+            <input type="text" id="reg-thirdparty-contact">
+          </div>
+          <div class="form-group">
+            <label for="reg-thirdparty-password">Mật khẩu</label>
+            <input type="password" id="reg-thirdparty-password">
+          </div>
+          <button class="btn" onclick="registerThirdParty()">Đăng ký</button>
+          <div id="register-result"></div>
         </div>
       </div>
     </div>
 
-    <!-- Request Access removed -->
-
-    <div id="register" class="section" style="display:none;">
-      <div class="card">
-        <h2>📝 Đăng Ký Bên Thứ Ba</h2>
-        <div class="info">Bên thứ ba tự tạo tài khoản của chính mình tại đây.</div>
+    <!-- Verification Modal -->
+    <div id="verify-modal" class="modal">
+      <div class="modal-content">
+        <span class="close" onclick="closeVerifyModal()">&times;</span>
+        <h2>Xác thực cho Yêu cầu <span id="modal-request-id" style="font-family: monospace; font-size: 0.8em;"></span></h2>
+        <p><strong>Công dân:</strong> <span id="modal-citizen-id"></span></p>
+        <p><strong>Tài liệu:</strong> <span id="modal-doc-title"></span></p>
+        <hr style="margin: 15px 0;">
         <div class="form-group">
-          <label>ID Bên Thứ Ba:</label>
-          <input type="text" id="reg-thirdparty-id" placeholder="thirdparty_company">
+            <label for="modal-qr-payload">Dán nội dung QR đã quét từ giấy tờ của công dân:</label>
+          <textarea id="modal-qr-payload" rows="6" placeholder="p7b_b64|officer_id|signed_at|citizen_id|doc_id|"></textarea>
         </div>
-        <div class="form-group">
-          <label>Tên Tổ Chức:</label>
-          <input type="text" id="reg-thirdparty-org" placeholder="Công ty ABC">
-        </div>
-        <div class="form-group">
-          <label>Email Liên Hệ:</label>
-          <input type="email" id="reg-thirdparty-email" placeholder="contact@abc.com">
-        </div>
-        <div class="form-group">
-          <label>Người Liên Hệ:</label>
-          <input type="text" id="reg-thirdparty-contact" placeholder="Nguyễn Văn B">
-        </div>
-        <div class="form-group">
-          <label>Mật khẩu:</label>
-          <input type="password" id="reg-thirdparty-password">
-        </div>
-        <button onclick="registerThirdParty()">Đăng Ký Bên Thứ Ba</button>
-        <div id="register-result" style="margin-top: 20px;"></div>
-      </div>
-    </div>
-
-    <div id="login" class="section" style="display:none;">
-      <div class="card">
-        <h2>🔐 Đăng Nhập Bên Thứ Ba</h2>
-        <div class="form-group">
-          <label>ID Bên Thứ Ba:</label>
-          <input type="text" id="login-thirdparty-id" placeholder="thirdparty_company">
-        </div>
-        <div class="form-group">
-          <label>Mật khẩu:</label>
-          <input type="password" id="login-thirdparty-password">
-        </div>
-        <button onclick="loginThirdParty()">Đăng Nhập</button>
-        <div id="login-result" style="margin-top: 20px;"></div>
-      </div>
-    </div>
-
-    <!-- My Requests removed -->
-
-    <!-- Shared Documents -->
-    <div id="shared" class="section" style="display:none;">
-      <div class="card">
-        <h2>📄 Tài Liệu Được Chia Sẻ</h2>
-        <button onclick="loadSharedDocuments()">Tải Danh Sách</button>
-        <div id="shared-docs" style="margin-top: 20px;"></div>
-      </div>
-    </div>
-
-    <!-- Verify Certificate by Document -->
-    <div id="verify" class="section" style="display:none;">
-      <div class="card">
-        <h2>✅ Lấy Cert Từ PKI Theo Tài Liệu</h2>
-        <div class="form-group">
-          <label>ID Tài Liệu:</label>
-          <input type="text" id="verify-doc-id" placeholder="DOC-2026-001">
-        </div>
-        <div class="form-group">
-          <label>ID Officer (fallback, tùy chọn):</label>
-          <input type="text" id="verify-officer-id" placeholder="officer_001">
-        </div>
-        <button onclick="verifyDocumentByPKI()">Request PKI & Verify</button>
-        <div id="verify-result" style="margin-top: 20px;"></div>
+        <button class="btn" onclick="performVerification()">Thực hiện xác thực</button>
+        <div id="modal-verify-result" style="margin-top: 20px;"></div>
       </div>
     </div>
   </div>
 
+  <script src="portal-api.js"></script>
   <script>
-    const API_URL = 'http://localhost:8080';
-    let orgName = localStorage.getItem('orgName') || 'Organization';
+    const TP_SESSION_KEY = 'sessionId';
+    const TP_USER_ID_KEY = 'thirdparty_user_id';
+    const TP_USER_TYPE_KEY = 'thirdparty_user_type';
+    const TP_DISPLAY_NAME_KEY = 'thirdparty_display_name';
+
+    function getThirdpartySessionId() {
+      return localStorage.getItem(TP_SESSION_KEY) || localStorage.getItem('sessionId');
+    }
 
     function showSection(section) {
-      document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
-      if (section === 'dashboard') document.getElementById('dashboard').style.display = 'block';
-      else if (section === 'login') document.getElementById('login').style.display = 'block';
-      else if (section === 'shared') { document.getElementById('shared').style.display = 'block'; loadSharedDocuments(); }
-      else if (section === 'register') document.getElementById('register').style.display = 'block';
-      else if (section === 'verify') document.getElementById('verify').style.display = 'block';
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      const map = { dashboard: 'dashboard', auth: 'auth' };
+      const id = map[section];
+      if (id) document.getElementById(id).classList.add('active');
+    }
+
+    function showAuthTab(tab) {
+      document.getElementById('auth-login-panel').style.display = tab === 'login' ? 'block' : 'none';
+      document.getElementById('auth-register-panel').style.display = tab === 'register' ? 'block' : 'none';
+      document.getElementById('auth-tab-login').classList.toggle('active', tab === 'login');
+      document.getElementById('auth-tab-register').classList.toggle('active', tab === 'register');
     }
 
     async function loginThirdParty() {
@@ -172,27 +139,31 @@
       const password = document.getElementById('login-thirdparty-password').value.trim();
       const resultEl = document.getElementById('login-result');
       if (!thirdpartyId || !password) {
-        resultEl.innerHTML = `<div class="error">Vui lòng nhập ID và mật khẩu</div>`;
+        resultEl.innerHTML = `<div class="alert error">Vui lòng nhập tên đăng nhập và mật khẩu</div>`;
         return;
       }
       try {
-        const response = await fetch(`${API_URL}/api/storage/login`, {
+        const response = await apiFetch('/api/storage/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: thirdpartyId, password: password, user_type: 'thirdparty' })
+          body: { user_id: thirdpartyId, password, user_type: 'thirdparty' },
         });
-        const data = await response.json();
-        if (response.ok && data.session_id) {
-          localStorage.setItem('sessionId', data.session_id);
-          localStorage.setItem('user_id', data.user_id);
-          localStorage.setItem('user_type', data.user_type);
-          resultEl.innerHTML = `<div class="success">✓ Đăng nhập thành công. Session: ${data.session_id}</div>`;
+        const data = await response.json().catch(() => ({}));
+        const token = data.token || data.session_id;
+        if (response.ok && token) {
+          saveSession(data, data.user_id || thirdpartyId, localStorage.getItem(TP_DISPLAY_NAME_KEY) || thirdpartyId);
+          localStorage.setItem(TP_USER_ID_KEY, data.user_id || thirdpartyId);
+          localStorage.setItem(TP_USER_TYPE_KEY, data.user_type || 'thirdparty');
+          resultEl.innerHTML = `<div class="alert success">Đăng nhập thành công.</div>`;
           updateAuthUI();
+          showSection('dashboard');
+          loadVerificationRequests();
         } else {
-          resultEl.innerHTML = `<div class="error">Đăng nhập thất bại: ${data.error || 'Kiểm tra thông tin'}</div>`;
+          clearSession();
+          resultEl.innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Kiểm tra thông tin'}. Demo: thirdparty_demo / demo12345</div>`;
         }
       } catch (e) {
-        resultEl.innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        clearSession();
+        resultEl.innerHTML = `<div class="alert error">Không kết nối API (${API_URL}). ${e.message}</div>`;
       }
     }
 
@@ -216,97 +187,222 @@
         });
         const data = await response.json();
         if (response.ok) {
-          document.getElementById('register-result').innerHTML = `<div class="success">✓ Đã tạo tài khoản ${data.thirdparty_id}. Bạn có thể đăng nhập ngay.</div>`;
+          localStorage.setItem(TP_DISPLAY_NAME_KEY, orgName);
+          document.getElementById('register-result').innerHTML = `<div class="alert success">Đăng ký thành công. Bạn có thể đăng nhập ngay.</div>`;
+          showAuthTab('login');
+          document.getElementById('login-thirdparty-id').value = thirdpartyId;
         } else {
-          document.getElementById('register-result').innerHTML = `<div class="error">Lỗi: ${data.error || 'Không thể đăng ký'}</div>`;
+          document.getElementById('register-result').innerHTML = `<div class="alert error">Lỗi: ${data.error || 'Không thể đăng ký'}</div>`;
         }
       } catch (e) {
-        document.getElementById('register-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        document.getElementById('register-result').innerHTML = `<div class="alert error">Lỗi: ${e.message}</div>`;
       }
     }
 
-    // Auth UI helpers
     function updateAuthUI() {
-      const sid = localStorage.getItem('sessionId');
-      const loginResult = document.getElementById('login-result');
+      const sid = getThirdpartySessionId();
+      const displayName = localStorage.getItem(TP_DISPLAY_NAME_KEY) || localStorage.getItem(TP_USER_ID_KEY) || '';
+      const navAuth = document.getElementById('nav-auth');
+      const navLogout = document.getElementById('nav-logout');
+      const headerUser = document.getElementById('header-user');
       if (sid) {
-        loginResult.innerHTML = `<div class="success">Đã đăng nhập</div>`;
-        const navLogin = document.getElementById('nav-login');
-        const navLogout = document.getElementById('nav-logout');
-        if (navLogin) navLogin.style.display = 'none';
-        if (navLogout) navLogout.style.display = 'inline';
+        if (navAuth) navAuth.style.display = 'none';
+        if (navLogout) navLogout.style.display = 'inline-flex';
+        if (headerUser) {
+          headerUser.style.display = 'inline-flex';
+          headerUser.innerHTML = `<span>Xin chào,</span><strong>${displayName}</strong>`;
+        }
       } else {
-        if (loginResult) loginResult.innerHTML = '';
-        const navLogin = document.getElementById('nav-login');
-        const navLogout = document.getElementById('nav-logout');
-        if (navLogin) navLogin.style.display = 'inline';
+        if (navAuth) navAuth.style.display = 'inline-flex';
         if (navLogout) navLogout.style.display = 'none';
+        if (headerUser) headerUser.style.display = 'none';
       }
     }
 
     function thirdpartyLogout() {
+      localStorage.removeItem(TP_SESSION_KEY);
       localStorage.removeItem('sessionId');
-      localStorage.removeItem('user_id');
-      localStorage.removeItem('user_type');
+      localStorage.removeItem(TP_USER_ID_KEY);
+      localStorage.removeItem(TP_USER_TYPE_KEY);
       updateAuthUI();
-      showSection('login');
+      showSection('auth');
+      showAuthTab('login');
     }
 
-    // Access request functionality removed from third-party portal per request.
-
-    async function loadSharedDocuments() {
+    async function loadVerificationRequests() {
+      const listEl = document.getElementById('verify-requests-list');
+      const sessionId = getThirdpartySessionId();
+      if (!sessionId) {
+        listEl.innerHTML = '<div class="alert info">Vui lòng đăng nhập để xem các yêu cầu.</div>';
+        return;
+      }
       try {
-        const response = await fetch(`${API_URL}/api/storage/document-qr?limit=50`);
+        const response = await fetch(`${API_URL}/api/storage/document-verify-requests?status=pending`, {
+          headers: { 'Authorization': `Bearer ${sessionId}` }
+        });
         const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Không thể tải danh sách yêu cầu');
 
-        let html = '<table><tr><th>Tài Liệu</th><th>Loại</th><th>Công Dân</th><th>Chia Sẻ Lúc</th></tr>';
-        data.qrs?.forEach(qr => {
-          html += `<tr><td>${qr.document_id}</td><td>${qr.document_type}</td><td>Công Dân</td><td>${new Date(qr.created_at).toLocaleString('vi-VN')}</td></tr>`;
+        window.verificationRequests = data.requests || [];
+
+        if (window.verificationRequests.length === 0) {
+          listEl.innerHTML = '<div class="alert info">Không có yêu cầu xác thực nào đang chờ.</div>';
+          return;
+        }
+
+        let html = '<table><tr><th>Mã yêu cầu</th><th>Tên công dân</th><th>Tài liệu</th><th>Ngày gửi</th><th>Hành động</th></tr>';
+        window.verificationRequests.forEach(req => {
+          html += `<tr>
+            <td class="muted">${req.request_id}</td>
+            <td>${req.citizen_id}</td>
+            <td>${req.doc_title}</td>
+            <td>${new Date(req.created_at).toLocaleString('vi-VN')}</td>
+            <td><button class="btn" onclick="openVerifyModal('${req.request_id}')">Xác thực</button></td>
+          </tr>`;
         });
         html += '</table>';
-        document.getElementById('shared-docs').innerHTML = html || '<p>Không có tài liệu được chia sẻ</p>';
+        listEl.innerHTML = html;
       } catch (e) {
-        document.getElementById('shared-docs').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        listEl.innerHTML = `<div class="alert error">Lỗi: ${e.message}</div>`;
       }
     }
 
-    async function verifyDocumentByPKI() {
-      const docId = document.getElementById('verify-doc-id').value.trim();
-      const officerId = document.getElementById('verify-officer-id').value.trim();
-      if (!docId) {
-        alert('Vui lòng nhập ID tài liệu');
+    function openVerifyModal(requestId) {
+      const request = (window.verificationRequests || []).find(r => r.request_id === requestId);
+      if (!request) {
+        alert('Không tìm thấy yêu cầu.');
+        return;
+      }
+      window.currentVerificationRequest = request;
+      document.getElementById('modal-request-id').textContent = request.request_id;
+      document.getElementById('modal-citizen-id').textContent = request.citizen_id;
+      document.getElementById('modal-doc-title').textContent = request.doc_title;
+      document.getElementById('modal-qr-payload').value = '';
+      document.getElementById('modal-verify-result').innerHTML = '';
+      document.getElementById('verify-modal').style.display = 'block';
+    }
+
+    function closeVerifyModal() {
+      document.getElementById('verify-modal').style.display = 'none';
+      window.currentVerificationRequest = null;
+    }
+
+    async function performVerification() {
+      const request = window.currentVerificationRequest;
+      if (!request) return;
+
+      const qrPayload = document.getElementById('modal-qr-payload').value.trim();
+      const resultBox = document.getElementById('modal-verify-result');
+      const sessionId = getThirdpartySessionId();
+
+      if (!sessionId) {
+        resultBox.innerHTML = '<div class="error">Phiên đăng nhập bên thứ ba không hợp lệ, vui lòng đăng nhập lại.</div>';
+        return;
+      }
+
+      if (!qrPayload) {
+        resultBox.innerHTML = '<div class="error">Vui lòng dán nội dung QR.</div>';
         return;
       }
 
       try {
-        const query = officerId ? `?officer_id=${encodeURIComponent(officerId)}` : '';
-        const response = await fetch(`${API_URL}/api/pki/certificates/by-document/${encodeURIComponent(docId)}${query}`);
+        const response = await fetch(`${API_URL}/api/storage/document-verify-requests/${request.request_id}/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionId}` },
+            body: JSON.stringify({ qr_payload: qrPayload, document_base64: request.document_base64 })
+        });
         const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || 'Không tìm thấy certificate cho tài liệu');
+        const details = data.result_details || {};
+        const errorMessage =
+          data.error ||
+          (data.result_details && (data.result_details.error || data.result_details.message)) ||
+          (data.doc_service_result && (data.doc_service_result.error || data.doc_service_result.message)) ||
+          'Lỗi không xác định';
+        const hashDetails = (details.expected_content_hash && details.provided_content_hash)
+          ? `<p><strong>Hash mong đợi:</strong> ${details.expected_content_hash}</p><p><strong>Hash đang gửi:</strong> ${details.provided_content_hash}</p>`
+          : '';
+        const fallbackDetails = details.fallback_verified
+          ? `<p><strong>Ghi chú:</strong> Đã xác thực thành công bằng key_version ${details.signature_key_version} từ PKI.</p>`
+          : '';
+        
+        let finalStatus;
+        if (response.ok && data.success) {
+          finalStatus = 'verified';
+          resultBox.innerHTML = `<div class="success"><h4>Tài liệu hợp lệ</h4><p></p>${fallbackDetails}</div>`;
+        } else {
+          finalStatus = 'rejected';
+          resultBox.innerHTML = `<div class="error"><h4>Tài liệu không hợp lệ</h4><p>${errorMessage}</p>${hashDetails}</div>`;
         }
 
-        document.getElementById('verify-result').innerHTML = `
-          <div class="success">
-            <strong>✓ PKI trả về certificate cho verify</strong><br>
-            <p><strong>Document:</strong> ${data.document_id}</p>
-            <p><strong>Cert ID:</strong> ${data.cert_id}</p>
-            <p><strong>Officer ID:</strong> ${data.officer_id || 'N/A'}</p>
-            <p><strong>Issuer:</strong> ${data.issuer}</p>
-            <p><strong>Subject:</strong> ${data.subject}</p>
-            <details>
-              <summary>Xem PEM certificate</summary>
-              <pre style="white-space: pre-wrap; margin-top: 8px;">${data.certificate || ''}</pre>
-            </details>
-          </div>
-        `;
+        // Refresh list after a delay
+        setTimeout(() => {
+          closeVerifyModal();
+          loadVerificationRequests();
+        }, 2000);
+
+      } catch (error) {
+        resultBox.innerHTML = `<div class="error"><h4>Lỗi hệ thống</h4><p>${error}</p></div>`;
+      }
+    }
+
+    async function verifyQRDirect() {
+      const qrPayload = document.getElementById('direct-qr-payload').value.trim();
+      const resultEl = document.getElementById('direct-verify-result');
+      
+      if (!qrPayload) {
+        resultEl.innerHTML = '<div class="error">Vui lòng dán nội dung QR để xác thực.</div>';
+        return;
+      }
+
+      try {
+        resultEl.innerHTML = '<div class="info">Đang xác thực...</div>';
+        
+        const response = await fetch(`${API_URL}/api/storage/verify-document-qr`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ qr_payload: qrPayload })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          const details = data.verification_details || {};
+          resultEl.innerHTML = `
+            <div class="success">
+              <h4>Xác thực thành công</h4>
+              <table>
+                <tr><td><strong>Officer ID:</strong></td><td>${data.officer_id}</td></tr>
+                <tr><td><strong>Thuật toán ký:</strong></td><td>${details.signature_algorithm || 'N/A'}</td></tr>
+                <tr><td><strong>ID Công dân:</strong></td><td>${details.citizen_id || 'N/A'}</td></tr>
+                <tr><td><strong>ID Tài liệu:</strong></td><td>${details.document_id || 'N/A'}</td></tr>
+                <tr><td><strong>Ngày ký:</strong></td><td>${details.signed_at || 'N/A'}</td></tr>
+                <tr><td><strong>Trạng thái chứng chỉ:</strong></td><td>Còn hoạt động</td></tr>
+                <tr><td><strong>Hết hạn:</strong></td><td>${details.cert_expires_at || 'N/A'}</td></tr>
+              </table>
+            </div>
+          `;
+        } else {
+          resultEl.innerHTML = `
+            <div class="error">
+              <h4>Xác thực thất bại</h4>
+              <p><strong>Officer:</strong> ${data.officer_id || 'N/A'}</p>
+              <p><strong>Lý do:</strong> ${data.error || 'Không xác định'}</p>
+            </div>
+          `;
+        }
       } catch (e) {
-        document.getElementById('verify-result').innerHTML = `<div class="error">Lỗi verify: ${e.message}</div>`;
+        resultEl.innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
       }
     }
 
     updateAuthUI();
-    showSection('dashboard');
+    if (getThirdpartySessionId()) {
+      showSection('dashboard');
+      loadVerificationRequests();
+    } else {
+      showSection('auth');
+      showAuthTab('login');
+    }
   </script>
 </body>
 </html>

@@ -4,71 +4,37 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cổng Công Dân</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 30px; margin-bottom: 30px; border-radius: 8px; }
-    header h1 { font-size: 2em; margin-bottom: 10px; }
-    header p { opacity: 0.9; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .card h2 { color: #1e3c72; margin-bottom: 15px; }
-    .card p { color: #666; margin-bottom: 10px; line-height: 1.6; }
-    button { background: #2a5298; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1em; }
-    button:hover { background: #1e3c72; }
-    .form-group { margin-bottom: 15px; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; }
-    input[type="text"], input[type="password"], textarea { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 1em; }
-    input[type="file"] { width: 100%; padding: 8px 0; }
-    textarea { resize: vertical; min-height: 100px; }
-    .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
-    .modal-content { background: white; margin: 50px auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 500px; }
-    .close { color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer; float: right; }
-    .close:hover { color: black; }
-    .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    .error { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 4px; margin-bottom: 15px; }
-    .info { background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 4px; margin: 10px 0; }
-    nav { background: #333; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-    nav a { color: white; text-decoration: none; margin-right: 20px; }
-    nav a:hover { color: #2a5298; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-    th { background: #f5f5f5; font-weight: bold; }
-    tr:hover { background: #f9f9f9; }
-    .qr-container { text-align: center; background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0; }
-    .qr-container img { max-width: 300px; }
-  </style>
+  <link rel="stylesheet" href="shared-portal.css">
+  <style>:root { --accent: #2563eb; --header-gradient: linear-gradient(135deg, #1e3c72, #2a5298); }</style>
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>Cổng Công Dân</h1>
-      <p>Dịch vụ công trực tuyến</p>
+    <header class="app-header">
+      <div>
+        <h1>Cổng Công Dân</h1>
+        <p>Dịch vụ công trực tuyến — tra cứu, ký và xác thực tài liệu</p>
+      </div>
+      <div id="header-user" class="user-badge" style="display:none"></div>
     </header>
 
-    <nav>
-      <a href="#dashboard" onclick="showSection('dashboard')">Trang Chủ</a>
-      <a href="#scan-qr" onclick="showSection('scan')">Quét QR</a>
-      <a href="#sign-pdf" onclick="showSection('sign')">Ký PDF</a>
-      <a href="#documents" onclick="showSection('documents')">Tài Liệu</a>
-      <a href="#profile" onclick="showSection('profile')">Hồ Sơ</a>
-      <a href="#register" onclick="showSection('register')">Đăng Ký</a>
-      <a href="#login" onclick="showSection('login')">Đăng Nhập</a>
+    <nav class="app-nav">
+      <a href="#dashboard" onclick="showSection('dashboard')">Trang chủ</a>
+      <a href="#verify-request" onclick="showSection('verify-request')">Xác thực</a>
+      <a href="#sign" onclick="showSection('sign')">Ký PDF</a>
+      <a href="#documents" onclick="showSection('documents')">Tài liệu</a>
+      <a href="#profile" onclick="showSection('profile')">Hồ sơ</a>
+      <span class="nav-spacer"></span>
+      <a id="nav-auth" href="#auth" onclick="showSection('auth')">Tài khoản</a>
+      <a id="nav-logout" href="#" onclick="citizenLogout()" style="display:none">Đăng xuất</a>
     </nav>
 
     <!-- Dashboard Section -->
     <div id="dashboard" class="section">
       <div class="grid">
         <div class="card">
-          <h2>Quét QR Giấy Tờ</h2>
-          <p>Quét mã QR trên giấy tờ, chứng chỉ, giấy phép để điều chỉnh thông tin hoặc truy cập dịch vụ công.</p>
-          <button onclick="showSection('scan')">Quét QR →</button>
-        </div>
-        <div class="card">
           <h2>Tài Liệu Của Tôi</h2>
           <p>Xem danh sách tài liệu đã quét, chứng thực hoặc được cấp phát từ cơ quan.</p>
-          <button onclick="showSection('documents')">Xem Tài Liệu →</button>
+          <button class="btn" onclick="showSection('documents')">Xem tài liệu</button>
         </div>
         <div class="card">
           <h2>Upload PDF để Ký</h2>
@@ -83,27 +49,26 @@
       </div>
     </div>
 
-    <!-- Scan QR Section -->
-    <div id="scan" class="section" style="display:none;">
+    <!-- Verify Request Section -->
+    <div id="verify-request" class="section" style="display:none;">
       <div class="card">
-        <h2>Quét Mã QR Tài Liệu</h2>
+        <h2>Gửi Yêu Cầu Xác Thực Tài Liệu</h2>
+        <p>Tải lên file tài liệu gốc và chọn bên thứ ba bạn muốn đến để xác thực trực tiếp.</p>
+        <div class="info">Vui lòng đăng nhập trước khi gửi yêu cầu.</div>
         <div class="form-group">
-          <label>Nhập payload QR từ tài liệu:</label>
-          <textarea id="qr-payload" placeholder="Dữ liệu từ QR"></textarea>
+          <label>ID Bên Thứ Ba (ví dụ: ngân hàng, trường học):</label>
+          <input type="text" id="verify-req-thirdparty-id" placeholder="thirdparty_company">
         </div>
         <div class="form-group">
-          <label>Officer (người duyệt):</label>
-          <input type="text" id="qr-target-officer" placeholder="officer_001">
+          <label>Tiêu Đề Tài Liệu:</label>
+          <input type="text" id="verify-req-doc-title" placeholder="Giấy tờ cần xác thực">
         </div>
-        <button onclick="verifyQR()">Quét & Xác Thực</button>
-        <div id="qr-result" style="margin-top: 20px;"></div>
-      </div>
-
-      <!-- QR Already Scanned -->
-      <div class="card" style="margin-top: 20px;">
-        <h2>📋 QR Đã Quét (Phiên này)</h2>
-        <button onclick="loadScannedQRList()">Tải Danh Sách</button>
-        <div id="scanned-qr-list" style="margin-top: 15px;"></div>
+        <div class="form-group">
+          <label>Chọn file tài liệu gốc:</label>
+          <input type="file" id="verify-req-doc-file">
+        </div>
+        <button onclick="submitVerificationRequest()">Gửi Yêu Cầu</button>
+        <div id="verify-req-result" style="margin-top: 20px;"></div>
       </div>
     </div>
 
@@ -160,66 +125,100 @@
       </div>
     </div>
 
-    <div id="register" class="section" style="display:none;">
-      <div class="card">
-        <h2>Đăng Ký Công Dân</h2>
-        <div class="info">Công dân tự tạo tài khoản công dân tại đây. Sau khi đăng ký, dùng chính tài khoản này để đăng nhập portal.</div>
-        <div class="form-group">
-          <label>ID Công Dân:</label>
-          <input type="text" id="reg-citizen-id" placeholder="citizen_001">
+    <div id="auth" class="section" style="display:none;">
+      <div class="auth-layout">
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab active" id="auth-tab-login" onclick="showAuthTab('login')">Đăng nhập</button>
+          <button type="button" class="auth-tab" id="auth-tab-register" onclick="showAuthTab('register')">Đăng ký</button>
         </div>
-        <div class="form-group">
-          <label>Tên:</label>
-          <input type="text" id="reg-citizen-name" placeholder="Nguyễn Văn A">
+        <div class="card" id="auth-login-panel">
+          <h2>Đăng nhập công dân</h2>
+          <div class="form-group">
+            <label for="username">Tên đăng nhập</label>
+            <input type="text" id="username" autocomplete="username" placeholder="citizen_demo" value="citizen_demo">
+          </div>
+          <div class="form-group">
+            <label for="password">Mật khẩu</label>
+            <input type="password" id="password" autocomplete="current-password" value="demo12345">
+          </div>
+          <button class="btn" onclick="login()">Đăng nhập</button>
+          <div id="login-result"></div>
         </div>
-        <div class="form-group">
-          <label>Email:</label>
-          <input type="text" id="reg-citizen-email" placeholder="citizen@example.com">
+        <div class="card" id="auth-register-panel" style="display:none;">
+          <h2>Đăng ký công dân</h2>
+          <p class="auth-note">Tạo tài khoản mới để sử dụng dịch vụ ký và xác thực tài liệu.</p>
+          <div class="form-group">
+            <label for="reg-citizen-id">Tên đăng nhập</label>
+            <input type="text" id="reg-citizen-id" placeholder="vd: nguyenvana">
+          </div>
+          <div class="form-group">
+            <label for="reg-citizen-name">Họ và tên</label>
+            <input type="text" id="reg-citizen-name">
+          </div>
+          <div class="form-group">
+            <label for="reg-citizen-email">Email</label>
+            <input type="text" id="reg-citizen-email">
+          </div>
+          <div class="form-group">
+            <label for="reg-citizen-password">Mật khẩu</label>
+            <input type="password" id="reg-citizen-password">
+          </div>
+          <div class="form-group">
+            <label for="reg-citizen-region">Mã vùng (tùy chọn)</label>
+            <input type="text" id="reg-citizen-region" placeholder="VN-HN">
+          </div>
+          <button class="btn" onclick="registerCitizen()">Đăng ký</button>
+          <div id="register-result"></div>
         </div>
-        <div class="form-group">
-          <label>Mật khẩu:</label>
-          <input type="password" id="reg-citizen-password">
-        </div>
-        <div class="form-group">
-          <label>Mã vùng (tùy chọn):</label>
-          <input type="text" id="reg-citizen-region" placeholder="VN-HN">
-        </div>
-        <button onclick="registerCitizen()">Đăng Ký Công Dân</button>
-        <div id="register-result" style="margin-top: 20px;"></div>
-      </div>
-    </div>
-
-    <!-- Login Section -->
-    <div id="login" class="section" style="display:none;">
-      <div class="card">
-        <h2>Đăng Nhập</h2>
-        <div class="form-group">
-          <label>Tên đăng nhập:</label>
-          <input type="text" id="username" placeholder="citizen_001">
-        </div>
-        <div class="form-group">
-          <label>Mật khẩu:</label>
-          <input type="password" id="password">
-        </div>
-        <button onclick="login()">Đăng Nhập</button>
-        <div id="login-result" style="margin-top: 20px;"></div>
       </div>
     </div>
   </div>
 
+  <script src="portal-api.js"></script>
   <script>
-    const API_URL = `${window.location.protocol}//${window.location.hostname}:8080`;
-    let sessionId = localStorage.getItem('sessionId') || null;
+    let sessionId = getSessionToken() || null;
 
     function showSection(section) {
       document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
-      if (section === 'dashboard') document.getElementById('dashboard').style.display = 'block';
-      else if (section === 'scan') document.getElementById('scan').style.display = 'block';
-      else if (section === 'documents') document.getElementById('documents').style.display = 'block';
-      else if (section === 'sign') document.getElementById('sign').style.display = 'block';
-      else if (section === 'profile') { document.getElementById('profile').style.display = 'block'; loadProfile(); }
-      else if (section === 'register') document.getElementById('register').style.display = 'block';
-      else if (section === 'login') document.getElementById('login').style.display = 'block';
+      const map = { dashboard: 'dashboard', 'verify-request': 'verify-request', documents: 'documents', sign: 'sign', profile: 'profile', auth: 'auth' };
+      const id = map[section];
+      if (id) document.getElementById(id).style.display = 'block';
+      if (section === 'profile') loadProfile();
+    }
+
+    function showAuthTab(tab) {
+      document.getElementById('auth-login-panel').style.display = tab === 'login' ? 'block' : 'none';
+      document.getElementById('auth-register-panel').style.display = tab === 'register' ? 'block' : 'none';
+      document.getElementById('auth-tab-login').classList.toggle('active', tab === 'login');
+      document.getElementById('auth-tab-register').classList.toggle('active', tab === 'register');
+    }
+
+    function updateAuthUI() {
+      const name = localStorage.getItem('display_name') || localStorage.getItem('user_id') || '';
+      const headerUser = document.getElementById('header-user');
+      if (sessionId) {
+        document.getElementById('nav-auth').style.display = 'none';
+        document.getElementById('nav-logout').style.display = 'inline-flex';
+        if (headerUser) {
+          headerUser.style.display = 'inline-flex';
+          headerUser.innerHTML = `<span>Xin chào,</span><strong>${name}</strong>`;
+        }
+      } else {
+        document.getElementById('nav-auth').style.display = 'inline-flex';
+        document.getElementById('nav-logout').style.display = 'none';
+        if (headerUser) headerUser.style.display = 'none';
+      }
+    }
+
+    function citizenLogout() {
+      sessionId = null;
+      localStorage.removeItem('sessionId');
+      localStorage.removeItem('user_id');
+      localStorage.removeItem('user_type');
+      localStorage.removeItem('display_name');
+      updateAuthUI();
+      showSection('auth');
+      showAuthTab('login');
     }
 
     function requireLoginForSignedActions() {
@@ -264,121 +263,53 @@
         });
         const data = await response.json();
         if (response.ok) {
-          document.getElementById('register-result').innerHTML = `<div class="success">Đã tạo tài khoản ${data.citizen_id}. Bạn có thể đăng nhập ngay.</div>`;
+          document.getElementById('register-result').innerHTML = `<div class="alert success">Đăng ký thành công. Bạn có thể đăng nhập ngay.</div>`;
+          localStorage.setItem('display_name', name);
+          document.getElementById('username').value = citizenId;
+          showAuthTab('login');
         } else {
-          document.getElementById('register-result').innerHTML = `<div class="error">Lỗi: ${data.error || 'Không thể đăng ký'}</div>`;
+          document.getElementById('register-result').innerHTML = `<div class="alert error">Lỗi: ${data.error || 'Không thể đăng ký'}</div>`;
         }
       } catch (e) {
-        document.getElementById('register-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        document.getElementById('register-result').innerHTML = `<div class="alert error">Lỗi: ${e.message}</div>`;
       }
     }
 
-    async function verifyQR() {
-      const payload = document.getElementById('qr-payload').value.trim();
-      const targetOfficer = document.getElementById('qr-target-officer').value.trim() || 'officer_001';
-      if (!payload) { alert('Vui lòng nhập payload QR'); return; }
-
+    async function submitVerificationRequest() {
+      const resultEl = document.getElementById('verify-req-result');
       try {
-        const response = await fetch(`${API_URL}/api/qr/verify-document`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ qr_payload: payload })
-        });
-        const data = await response.json();
-        
-        // Store in session storage for this citizen
-        let scannedQRs = JSON.parse(sessionStorage.getItem('scannedQRs') || '[]');
-        const qrEntry = {
-          id: Date.now(),
-          payload: payload,
-          verification: data,
-          timestamp: new Date().toISOString(),
-          targetOfficer: targetOfficer,
-          submitted: false
-        };
-        scannedQRs.push(qrEntry);
-        sessionStorage.setItem('scannedQRs', JSON.stringify(scannedQRs));
-        
-        const resultHtml = `
-          <div class="success">
-            <strong>✓ QR Xác Thực Thành Công</strong>
-            <p><strong>Tài liệu:</strong> ${data.document_id}</p>
-            <p><strong>Loại:</strong> ${data.document_type}</p>
-            <button onclick="submitScannedQRToOfficer(${qrEntry.id}, '${targetOfficer}')" style="margin-top:10px;">📤 Gửi Yêu Cầu Cho Officer</button>
-            <details style="margin-top:10px;">
-              <summary>Chi tiết Metadata</summary>
-              <pre style="margin-top:10px; background:#f5f5f5; padding:10px;">${JSON.stringify(data, null, 2)}</pre>
-            </details>
-          </div>
-        `;
-        document.getElementById('qr-result').innerHTML = resultHtml;
-        loadScannedQRList();
-      } catch (e) {
-        document.getElementById('qr-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
-      }
-    }
+        const { citizenId } = requireLoginForSignedActions();
+        const thirdpartyId = document.getElementById('verify-req-thirdparty-id').value.trim();
+        const docTitle = document.getElementById('verify-req-doc-title').value.trim();
+        const fileInput = document.getElementById('verify-req-doc-file');
+        const file = fileInput.files && fileInput.files[0];
 
-    function loadScannedQRList() {
-      const scannedQRs = JSON.parse(sessionStorage.getItem('scannedQRs') || '[]');
-      if (!scannedQRs || scannedQRs.length === 0) {
-        document.getElementById('scanned-qr-list').innerHTML = '<div class="info">Chưa có QR nào được quét trong phiên này.</div>';
-        return;
-      }
-
-      let html = '<table><tr><th>Lần Quét</th><th>Tài Liệu</th><th>Loại</th><th>Công Dân</th><th>Officer Đích</th><th>Trạng Thái</th><th>Hành Động</th></tr>';
-      scannedQRs.forEach((qr, idx) => {
-        const meta = qr.verification?.metadata || {};
-        const status = qr.submitted ? '<span style="color:green;">✓ Đã gửi</span>' : '<span style="color:orange;">Chờ gửi</span>';
-        const action = qr.submitted ? '—' : `<button onclick="submitScannedQRToOfficer(${qr.id}, '${qr.targetOfficer}')" style="padding:5px 10px; font-size:0.8em;">Gửi</button>`;
-        html += `<tr>
-          <td>${idx + 1}</td>
-          <td>${qr.verification?.document_id || '?'}</td>
-          <td>${qr.verification?.document_type || '?'}</td>
-          <td>${meta.citizen_name || 'N/A'}</td>
-          <td>${qr.targetOfficer}</td>
-          <td>${status}</td>
-          <td>${action}</td>
-        </tr>`;
-      });
-      html += '</table>';
-      document.getElementById('scanned-qr-list').innerHTML = html;
-    }
-
-    async function submitScannedQRToOfficer(qrId, officerId) {
-      try {
-        if (!sessionId) {
-          alert('Vui lòng đăng nhập trước khi gửi QR');
-          return;
+        if (!thirdpartyId || !docTitle || !file) {
+          throw new Error('Vui lòng điền đầy đủ thông tin và chọn file.');
         }
-        const citizenId = localStorage.getItem('user_id');
-        let scannedQRs = JSON.parse(sessionStorage.getItem('scannedQRs') || '[]');
-        const qrEntry = scannedQRs.find(q => q.id === qrId);
-        if (!qrEntry) { alert('Không tìm thấy QR'); return; }
 
-        const response = await fetch(`${API_URL}/api/storage/qr-scan-requests`, {
+        const documentBase64 = await readFileAsBase64(file);
+
+        const response = await fetch(`${API_URL}/api/storage/document-verify-requests`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionId}` },
           body: JSON.stringify({
             citizen_id: citizenId,
-            officer_id: officerId,
-            qr_payload: qrEntry.payload,
-            qr_data: qrEntry.verification,
-            reason: 'citizen_qr_scan_authentication'
+            thirdparty_id: thirdpartyId,
+            doc_title: docTitle,
+            document_base64: documentBase64,
           })
         });
 
         const data = await response.json();
         if (response.ok) {
-          qrEntry.submitted = true;
-          qrEntry.requestId = data.request_id;
-          sessionStorage.setItem('scannedQRs', JSON.stringify(scannedQRs));
-          alert('✓ Đã gửi yêu cầu đến officer!');
-          loadScannedQRList();
+          resultEl.innerHTML = `<div class="success">Đã gửi yêu cầu xác thực thành công với ID: ${data.request_id}. Vui lòng mang giấy tờ có QR đến ${thirdpartyId} để hoàn tất.</div>`;
         } else {
-          alert(`Lỗi: ${data.error || 'Không thể gửi yêu cầu'}`);
+          resultEl.innerHTML = `<div class="error">Lỗi: ${data.error || 'Không thể gửi yêu cầu'}</div>`;
         }
+
       } catch (e) {
-        alert(`Lỗi: ${e.message}`);
+        resultEl.innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
       }
     }
 
@@ -442,7 +373,7 @@
         if (statusFilter) query.set('status', statusFilter);
         const response = await fetch(`${API_URL}/api/storage/documents?${query.toString()}`, { headers: { Authorization: `Bearer ${sessionId}` } });
         const data = await response.json();
-        let html = '<table><tr><th>Doc ID</th><th>Tiêu Đề</th><th>Loại</th><th>Trạng Thái Chữ Ký</th><th>Officer Ký</th><th>Ngày Ký</th><th>Ghi Chú</th></tr>';
+        let html = '<table><tr><th>Doc ID</th><th>Tiêu Đề</th><th>Loại</th><th>Trạng Thái Chữ Ký</th><th>Officer Ký</th><th>Ngày Ký</th><th>Ghi Chú</th><th>Tải QR</th><th>Tải .p7b</th></tr>';
         data.documents?.forEach(doc => {
           let signatureStatus = '';
           let note = '';
@@ -460,8 +391,15 @@
             signatureStatus = '<span style="color:gray;">—</span>';
             note = 'Chưa có chữ ký';
           }
+
+          let qrButton = '—';
+            let p7bButton = '—';
+          if (doc.status === 'signed') {
+              qrButton = `<button onclick="downloadDocumentQR('${doc.doc_id}')" style="background: #2a5298; color: white; padding: 5px 10px; border-radius: 4px; font-size: 0.9em; border: none; cursor: pointer;">Tải QR</button>`;
+              p7bButton = `<button onclick="downloadSignatureP7B('${doc.doc_id}')" style="background: #1f7a1f; color: white; padding: 5px 10px; border-radius: 4px; font-size: 0.9em; border: none; cursor: pointer;">Tải .p7b</button>`;
+          }
           
-          html += `<tr><td>${doc.doc_id}</td><td>${doc.doc_title || 'N/A'}</td><td>${doc.doc_type || 'N/A'}</td><td>${signatureStatus}</td><td>${doc.signed_by || 'N/A'}</td><td>${doc.signed_at || 'N/A'}</td><td>${note}</td></tr>`;
+            html += `<tr><td>${doc.doc_id}</td><td>${doc.doc_title || 'N/A'}</td><td>${doc.doc_type || 'N/A'}</td><td>${signatureStatus}</td><td>${doc.signed_by || 'N/A'}</td><td>${doc.signed_at || 'N/A'}</td><td>${note}</td><td>${qrButton}</td><td>${p7bButton}</td></tr>`;
         });
         html += '</table>';
         if (!data.documents || data.documents.length === 0) html = '<div class="info">Không có tài liệu phù hợp bộ lọc.</div>';
@@ -471,40 +409,110 @@
       }
     }
 
+    async function downloadDocumentQR(docId) {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/documents/${encodeURIComponent(docId)}/qr`, { headers: { Authorization: `Bearer ${sessionId}` } });
+        if (!response.ok) {
+          alert(`Không thể tải QR: ${response.status}`);
+          return;
+        }
+        
+        // Response is now a JPEG image
+        const blob = await response.blob();
+        if (blob.type !== 'image/jpeg') {
+          // Fallback for JSON response (if QR module not available)
+          const text = await blob.text();
+          const data = JSON.parse(text);
+          // Export as JSON file
+          const fileContent = JSON.stringify(data, null, 2);
+          const jsonBlob = new Blob([fileContent], { type: 'application/json' });
+          const url = URL.createObjectURL(jsonBlob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `qr-${docId}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } else {
+          // Download JPEG image
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `qr-${docId}.jpg`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        
+        alert(`Đã tải QR cho tài liệu ${docId}`);
+      } catch (e) {
+        alert(`Lỗi: ${e.message}`);
+      }
+    }
+
+    async function downloadSignatureP7B(docId) {
+      try {
+        const response = await fetch(`${API_URL}/api/storage/documents/${encodeURIComponent(docId)}/signature.p7b`, {
+          headers: { Authorization: `Bearer ${sessionId}` }
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          alert(`Không thể tải .p7b: ${data.error || response.status}`);
+          return;
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${docId}.p7b`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        alert(`Lỗi: ${e.message}`);
+      }
+    }
+
     async function loadProfile() {
       if (!sessionId) {
         document.getElementById('profile-info').innerHTML = '<div class="info">Vui lòng đăng nhập để xem hồ sơ</div>';
         return;
       }
-      document.getElementById('profile-info').innerHTML = `<div class="info">Session ID: ${sessionId}</div>`;
+      document.getElementById('profile-info').innerHTML = `<div class="alert info"><strong>Tên đăng nhập:</strong> ${localStorage.getItem('user_id') || '—'}<br><strong>Họ tên:</strong> ${localStorage.getItem('display_name') || '—'}</div>`;
     }
 
     async function login() {
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value.trim();
-
+      if (!username || !password) {
+        document.getElementById('login-result').innerHTML = '<div class="alert error">Vui lòng nhập tên đăng nhập và mật khẩu.</div>';
+        return;
+      }
       try {
-        const response = await fetch(`${API_URL}/api/storage/login`, {
+        const response = await apiFetch('/api/storage/login', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: username, password: password, user_type: 'citizen' })
+          body: { user_id: username, password, user_type: 'citizen' },
         });
-        const data = await response.json();
-        if (data.session_id) {
-          sessionId = data.session_id;
-          localStorage.setItem('sessionId', sessionId);
-          localStorage.setItem('user_id', username);
+        const data = await response.json().catch(() => ({}));
+        const token = data.token || data.session_id;
+        if (response.ok && token) {
+          sessionId = saveSession(data, username, username);
           localStorage.setItem('user_type', 'citizen');
-          document.getElementById('login-result').innerHTML = `<div class="success">Đăng nhập thành công!</div>`;
+          document.getElementById('login-result').innerHTML = `<div class="alert success">Đăng nhập thành công.</div>`;
+          updateAuthUI();
+          showSection('dashboard');
         } else {
-          document.getElementById('login-result').innerHTML = `<div class="error">Đăng nhập thất bại: ${data.error}</div>`;
+          clearSession();
+          sessionId = null;
+          document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Sai thông tin'}. Demo: citizen_demo / demo12345</div>`;
         }
       } catch (e) {
-        document.getElementById('login-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        clearSession();
+        sessionId = null;
+        document.getElementById('login-result').innerHTML = `<div class="alert error">Không kết nối API (${API_URL}). ${e.message}</div>`;
       }
     }
 
-    showSection('dashboard');
+    updateAuthUI();
+    showSection(sessionId ? 'dashboard' : 'auth');
   </script>
 </body>
 </html>

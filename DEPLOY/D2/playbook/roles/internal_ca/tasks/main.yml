@@ -1,4 +1,0 @@
-﻿- name: Vault not present; skip PKI URL configuration
-  debug:
-    msg: "Vault is not configured for this deployment; skipping PKI URL config"
-  changed_when: false
