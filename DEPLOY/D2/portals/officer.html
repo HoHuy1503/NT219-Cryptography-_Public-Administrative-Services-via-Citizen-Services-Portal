@@ -43,14 +43,14 @@
         </div>
         <div class="card" id="auth-login-panel">
           <h2>Đăng nhập cán bộ</h2>
-          <p class="auth-note">Tài khoản demo: <strong>officer_demo</strong> / <strong>demo12345</strong> (hoặc dùng tài khoản đã đăng ký).</p>
+          <p class="auth-note">Đăng nhập bằng tài khoản đã được cấp hoặc tài khoản đã đăng ký.</p>
           <div class="form-group">
             <label for="login-officer-id">Tên đăng nhập</label>
-            <input type="text" id="login-officer-id" autocomplete="username" placeholder="officer_demo" value="officer_demo">
+            <input type="text" id="login-officer-id" autocomplete="username" placeholder="Nhập tên đăng nhập">
           </div>
           <div class="form-group">
             <label for="login-officer-password">Mật khẩu</label>
-            <input type="password" id="login-officer-password" autocomplete="current-password" value="demo12345">
+            <input type="password" id="login-officer-password" autocomplete="current-password">
           </div>
           <button class="btn" onclick="officerLogin()">Đăng nhập</button>
           <div id="login-result"></div>
@@ -223,7 +223,7 @@
         if (!resp.ok || !data.token) {
           clearSession();
           sessionId = null;
-          return document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Không thể đăng nhập'}. Demo: officer_demo / demo12345</div>`;
+          return document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Không thể đăng nhập'}.</div>`;
         }
         sessionId = saveSession(data, data.user_id || officerId, null);
         localStorage.setItem('user_type', 'officer');

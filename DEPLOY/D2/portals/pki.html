@@ -89,11 +89,11 @@
           <h2>Đăng nhập quản trị PKI</h2>
           <div class="form-group">
             <label for="username">Tên đăng nhập</label>
-            <input type="text" id="username" autocomplete="username" placeholder="pki_admin" value="pki_admin">
+            <input type="text" id="username" autocomplete="username" placeholder="Nhập tên đăng nhập">
           </div>
           <div class="form-group">
             <label for="password">Mật khẩu</label>
-            <input type="password" id="password" autocomplete="current-password" value="pki_adm">
+            <input type="password" id="password" autocomplete="current-password">
           </div>
           <button class="btn" onclick="login()">Đăng nhập</button>
           <div id="login-result"></div>
@@ -167,7 +167,7 @@
         const token = data.token || data.session_id;
         if (!response.ok || !token) {
           clearSession();
-          resultEl.innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Thông tin không hợp lệ'}. Dùng pki_admin / pki_adm</div>`;
+          resultEl.innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Thông tin không hợp lệ'}.</div>`;
           return;
         }
         saveSession(data, username, username);

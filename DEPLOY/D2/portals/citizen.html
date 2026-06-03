@@ -135,11 +135,11 @@
           <h2>Đăng nhập công dân</h2>
           <div class="form-group">
             <label for="username">Tên đăng nhập</label>
-            <input type="text" id="username" autocomplete="username" placeholder="citizen_demo" value="citizen_demo">
+            <input type="text" id="username" autocomplete="username" placeholder="Nhập tên đăng nhập">
           </div>
           <div class="form-group">
             <label for="password">Mật khẩu</label>
-            <input type="password" id="password" autocomplete="current-password" value="demo12345">
+            <input type="password" id="password" autocomplete="current-password">
           </div>
           <button class="btn" onclick="login()">Đăng nhập</button>
           <div id="login-result"></div>
@@ -502,7 +502,7 @@
         } else {
           clearSession();
           sessionId = null;
-          document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Sai thông tin'}. Demo: citizen_demo / demo12345</div>`;
+          document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Sai thông tin'}.</div>`;
         }
       } catch (e) {
         clearSession();

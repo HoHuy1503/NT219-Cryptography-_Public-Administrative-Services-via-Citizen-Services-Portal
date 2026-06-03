@@ -62,11 +62,11 @@
           <h2>Đăng nhập bên thứ ba</h2>
           <div class="form-group">
             <label for="login-thirdparty-id">Tên đăng nhập</label>
-            <input type="text" id="login-thirdparty-id" autocomplete="username" placeholder="thirdparty_demo" value="thirdparty_demo">
+            <input type="text" id="login-thirdparty-id" autocomplete="username" placeholder="Nhập tên đăng nhập">
           </div>
           <div class="form-group">
             <label for="login-thirdparty-password">Mật khẩu</label>
-            <input type="password" id="login-thirdparty-password" autocomplete="current-password" value="demo12345">
+            <input type="password" id="login-thirdparty-password" autocomplete="current-password">
           </div>
           <button class="btn" onclick="loginThirdParty()">Đăng nhập</button>
           <div id="login-result"></div>
@@ -169,7 +169,7 @@
           loadVerificationRequests();
         } else {
           clearSession();
-          resultEl.innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Kiểm tra thông tin'}. Demo: thirdparty_demo / demo12345</div>`;
+          resultEl.innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || 'Kiểm tra thông tin'}.</div>`;
         }
       } catch (e) {
         clearSession();

@@ -138,11 +138,11 @@
           <h2>Đăng nhập quản trị</h2>
           <div class="form-group">
             <label for="username">Tên đăng nhập</label>
-            <input type="text" id="username" autocomplete="username" placeholder="storage_admin" value="storage_admin">
+            <input type="text" id="username" autocomplete="username" placeholder="Nhập tên đăng nhập">
           </div>
           <div class="form-group">
             <label for="password">Mật khẩu</label>
-            <input type="password" id="password" autocomplete="current-password" value="storage_adm">
+            <input type="password" id="password" autocomplete="current-password">
           </div>
           <button class="btn" onclick="login()">Đăng nhập</button>
           <div id="login-result"></div>
@@ -174,7 +174,7 @@
 
     function ensureLoggedIn() {
       if (!getSessionToken()) {
-        throw new Error('Vui lòng đăng nhập (storage_admin / storage_adm)');
+        throw new Error('Vui lòng đăng nhập.');
       }
     }
 
@@ -559,7 +559,7 @@
           showSection('dashboard');
         } else {
           clearSession();
-          document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || response.statusText}. Dùng storage_admin / storage_adm</div>`;
+          document.getElementById('login-result').innerHTML = `<div class="alert error">Đăng nhập thất bại: ${data.error || response.statusText}.</div>`;
         }
       } catch (e) {
         clearSession();
