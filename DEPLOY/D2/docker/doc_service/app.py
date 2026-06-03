@@ -5,9 +5,9 @@ from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from cryptography.x509.oid import ObjectIdentifier
 import subprocess
 import qrcode
@@ -93,6 +93,18 @@ def _validate_ml_dsa_public_key(public_key_pem):
   if "mldsa" not in key_name and "ml_dsa" not in key_name:
     raise ValueError("Only ML-DSA public keys are supported")
 
+  return public_key
+
+
+def _validate_ec_public_key(public_key_pem):
+  try:
+    public_key = load_pem_public_key(public_key_pem.encode('utf-8'))
+  except Exception:
+    raise ValueError("Invalid EC public key PEM")
+  if not isinstance(public_key, ec.EllipticCurvePublicKey):
+    raise ValueError("mTLS client certificates require an EC public key")
+  if public_key.curve.name not in ("secp256r1", "secp384r1"):
+    raise ValueError("Only P-256 or P-384 EC public keys are supported for mTLS")
   return public_key
 
 
@@ -346,7 +358,76 @@ def _issue_ml_officer_cert(common_name, organization, country="VN", state_or_pro
     }
     return item
 
-def _issue_identity_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="CA Q12", officer_id=None, document_id=None, purpose="officer_identity", provided_public_key_pem=None):
+
+def _issue_ec_mtls_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="GovPortal", subject_id=None, subject_type="identity", provided_public_key_pem=None):
+  if not provided_public_key_pem:
+    raise RuntimeError("EC mTLS certificate issuance requires a provided public key")
+  public_key = _validate_ec_public_key(provided_public_key_pem)
+  ca_key, ca_cert = _load_or_create_ca()
+  now = datetime.now(timezone.utc)
+  subject = x509.Name([
+    x509.NameAttribute(NameOID.COUNTRY_NAME, country[:2].upper()),
+    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, state_or_province),
+    x509.NameAttribute(NameOID.LOCALITY_NAME, locality),
+    x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization),
+    x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, organizational_unit),
+    x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+  ])
+  cert_obj = (
+    x509.CertificateBuilder()
+    .subject_name(subject)
+    .issuer_name(ca_cert.subject)
+    .public_key(public_key)
+    .serial_number(x509.random_serial_number())
+    .not_valid_before(now - timedelta(minutes=1))
+    .not_valid_after(now + timedelta(days=365))
+    .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+    .add_extension(x509.KeyUsage(
+      digital_signature=True,
+      content_commitment=False,
+      key_encipherment=False,
+      data_encipherment=False,
+      key_agreement=False,
+      key_cert_sign=False,
+      crl_sign=False,
+      encipher_only=False,
+      decipher_only=False,
+    ), critical=True)
+    .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+    .sign(private_key=ca_key, algorithm=hashes.SHA256())
+  )
+  cert_pem = cert_obj.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+  cert_id = f"cert-{uuid.uuid4().hex[:12]}"
+  return {
+    "cert_id": cert_id,
+    "officer_id": subject_id if subject_type == "officer" else None,
+    "subject_id": subject_id,
+    "subject_type": subject_type,
+    "document_id": None,
+    "purpose": "mtls_client",
+    "serial": format(cert_obj.serial_number, 'X'),
+    "subject": cert_obj.subject.rfc4514_string(),
+    "issuer": cert_obj.issuer.rfc4514_string(),
+    "not_before": cert_obj.not_valid_before_utc.isoformat(),
+    "not_after": cert_obj.not_valid_after_utc.isoformat(),
+    "certificate": cert_pem,
+    "public_key_pem": provided_public_key_pem,
+    "created_at": now.isoformat(),
+  }
+
+def _issue_identity_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="CA Q12", officer_id=None, document_id=None, purpose="officer_identity", provided_public_key_pem=None, subject_type="identity"):
+  if purpose == "mtls_client":
+    return _issue_ec_mtls_cert(
+      common_name=common_name,
+      organization=organization,
+      country=country,
+      state_or_province=state_or_province,
+      locality=locality,
+      organizational_unit=organizational_unit,
+      subject_id=officer_id,
+      subject_type=subject_type,
+      provided_public_key_pem=provided_public_key_pem,
+    )
   # Officer-issued certificates always use ML-DSA so the private key can sign documents directly.
   if purpose in ("officer_identity", "document_signing"):
     return _issue_ml_officer_cert(
@@ -795,11 +876,13 @@ def issue_certificate():
     state_or_province = (data.get("st") or data.get("state") or data.get("state_or_province") or PKI_SUBJECT_ST).strip()
     locality = (data.get("l") or data.get("locality") or PKI_SUBJECT_L).strip()
     organizational_unit = (data.get("ou") or data.get("organizational_unit") or PKI_SUBJECT_OU).strip()
-    officer_id = (data.get("officer_id") or "").strip() or None
-    # PKI only issues officer identity certificates in this deployment.
-    # Ignore any document-related parameters supplied by callers.
+    subject_type = (data.get("subject_type") or ("officer" if data.get("officer_id") else "identity")).strip()
+    subject_id = (data.get("subject_id") or data.get("officer_id") or "").strip() or None
+    officer_id = subject_id
+    # PKI issues identity certificates for portal users. Ignore document-related parameters supplied by callers.
     document_id = None
-    purpose = 'officer_identity'
+    cert_profile = (data.get("cert_profile") or "").strip()
+    purpose = "mtls_client" if cert_profile == "mtls_client" else f"{subject_type}_identity"
     public_key_pem = (data.get("public_key_pem") or "").strip() or None
     allow_reissue = bool(data.get("allow_reissue", False))
     
@@ -807,16 +890,19 @@ def issue_certificate():
       return jsonify({"error": "common_name is required"}), 400
     if public_key_pem:
       try:
-        _validate_ml_dsa_public_key(public_key_pem)
+        if purpose == "mtls_client":
+          _validate_ec_public_key(public_key_pem)
+        else:
+          _validate_ml_dsa_public_key(public_key_pem)
       except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    elif officer_id:
+    elif subject_type == "officer" and officer_id:
       public_key_pem = _load_current_officer_public_key_from_storage(officer_id)
     else:
       return jsonify({"error": "public_key_pem or officer_id is required"}), 400
 
     # Check 1-certificate-per-officer constraint for officer certificates
-    if purpose == "officer_identity" and officer_id and not allow_reissue:
+    if subject_type == "officer" and officer_id and not allow_reissue:
       records = _load_cert_store()
       if _officer_has_valid_cert(records, officer_id):
         return jsonify({
@@ -834,14 +920,15 @@ def issue_certificate():
       organizational_unit=organizational_unit,
       officer_id=officer_id,
       document_id=None,
-      purpose='officer_identity',
+      purpose=purpose,
       provided_public_key_pem=public_key_pem,
+      subject_type=subject_type,
     )
     records = _load_cert_store()
     records.insert(0, item)
     _save_cert_store(records)
-    # Register certificate with storage service (officer certs only)
-    if purpose == "officer_identity" and officer_id:
+    # Legacy registration with storage service for officer signing checks.
+    if subject_type == "officer" and officer_id:
       try:
         reg_payload = {
           "cert_id": item["cert_id"],
@@ -866,6 +953,8 @@ def issue_certificate():
       "subject": item["subject"],
       "certificate": item["certificate"],
       "officer_id": item.get("officer_id"),
+      "subject_type": subject_type,
+      "subject_id": subject_id,
       "document_id": item.get("document_id"),
       "purpose": item.get("purpose"),
       "public_key_pem": item["public_key_pem"],

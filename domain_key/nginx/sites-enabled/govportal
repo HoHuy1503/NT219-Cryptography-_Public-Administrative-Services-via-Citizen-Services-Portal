@@ -1,0 +1,148 @@
+upstream govportal_gateway {
+  server 127.0.0.1:8080;
+}
+
+server {
+    if ($host = officers.hnh2511.xyz) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = pki.hnh2511.xyz) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = thirdparties.hnh2511.xyz) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = dbadmin.hnh2511.xyz) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = citizens.hnh2511.xyz) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+  listen 80;
+  server_name citizens.hnh2511.xyz dbadmin.hnh2511.xyz thirdparties.hnh2511.xyz pki.hnh2511.xyz officers.hnh2511.xyz;
+  return 301 https://$host$request_uri;
+}
+
+server {
+  listen 443 ssl;
+  server_name citizens.hnh2511.xyz;
+    ssl_certificate /etc/letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem; # managed by Certbot
+  root /opt/govportal/DEPLOY/D2/portals;
+  location = / { try_files /citizen.html =404; }
+  location / { try_files $uri /citizen.html =404; }
+  location /api/ {
+    proxy_pass http://govportal_gateway;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+  }
+
+}
+
+server {
+  listen 443 ssl;
+  server_name dbadmin.hnh2511.xyz;
+    ssl_certificate /etc/letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem; # managed by Certbot
+  ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
+  ssl_verify_client on;
+  ssl_verify_depth 2;
+  root /opt/govportal/DEPLOY/D2/portals;
+  location = / { try_files /storage.html =404; }
+  location / { try_files $uri /storage.html =404; }
+  location /api/ {
+    proxy_pass http://govportal_gateway;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Client-Cert-Verify $ssl_client_verify;
+    proxy_set_header X-Client-Cert-Subject $ssl_client_s_dn;
+    proxy_set_header X-Client-Cert-Issuer $ssl_client_i_dn;
+  }
+
+}
+
+server {
+  listen 443 ssl;
+  server_name thirdparties.hnh2511.xyz;
+    ssl_certificate /etc/letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem; # managed by Certbot
+  ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
+  ssl_verify_client on;
+  ssl_verify_depth 2;
+  root /opt/govportal/DEPLOY/D2/portals;
+  location = / { try_files /thirdparty.html =404; }
+  location / { try_files $uri /thirdparty.html =404; }
+  location /api/ {
+    proxy_pass http://govportal_gateway;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Client-Cert-Verify $ssl_client_verify;
+    proxy_set_header X-Client-Cert-Subject $ssl_client_s_dn;
+    proxy_set_header X-Client-Cert-Issuer $ssl_client_i_dn;
+  }
+
+}
+
+server {
+  listen 443 ssl;
+  server_name pki.hnh2511.xyz;
+    ssl_certificate /etc/letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem; # managed by Certbot
+  ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
+  ssl_verify_client on;
+  ssl_verify_depth 2;
+  root /opt/govportal/DEPLOY/D2/portals;
+  location = / { try_files /pki.html =404; }
+  location / { try_files $uri /pki.html =404; }
+  location /api/ {
+    proxy_pass http://govportal_gateway;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Client-Cert-Verify $ssl_client_verify;
+    proxy_set_header X-Client-Cert-Subject $ssl_client_s_dn;
+    proxy_set_header X-Client-Cert-Issuer $ssl_client_i_dn;
+  }
+
+}
+
+server {
+  listen 443 ssl;
+  server_name officers.hnh2511.xyz;
+    ssl_certificate /etc/letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem; # managed by Certbot
+  ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
+  ssl_verify_client on;
+  ssl_verify_depth 2;
+  root /opt/govportal/DEPLOY/D2/portals;
+  location = / { try_files /officer.html =404; }
+  location / { try_files $uri /officer.html =404; }
+  location /api/ {
+    proxy_pass http://govportal_gateway;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Client-Cert-Verify $ssl_client_verify;
+    proxy_set_header X-Client-Cert-Subject $ssl_client_s_dn;
+    proxy_set_header X-Client-Cert-Issuer $ssl_client_i_dn;
+  }
+
+}

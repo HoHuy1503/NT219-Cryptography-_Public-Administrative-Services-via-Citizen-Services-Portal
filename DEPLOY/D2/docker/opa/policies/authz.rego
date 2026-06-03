@@ -82,6 +82,10 @@ officer_allowed(path, method) if {
 }
 
 officer_allowed(path, method) if {
+	startswith(path, "/api/storage/identity-certificates")
+}
+
+officer_allowed(path, method) if {
 	path == "/api/storage/status"
 }
 
@@ -123,6 +127,10 @@ thirdparty_allowed(path, method) if {
 
 thirdparty_allowed(path, method) if {
 	startswith(path, "/api/storage/documents")
+}
+
+thirdparty_allowed(path, method) if {
+	startswith(path, "/api/storage/identity-certificates")
 }
 
 thirdparty_allowed(path, method) if {

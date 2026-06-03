@@ -38,6 +38,23 @@
       <div class="card">
         <h2>Yêu cầu cấp chứng chỉ</h2>
         <p class="subtitle">Duyệt yêu cầu cấp mới hoặc gia hạn từ cán bộ.</p>
+        <div class="tool-row">
+          <select id="cert-request-status-filter" onchange="renderCertRequests(window.lastCertRequests || [])">
+            <option value="">Tất cả trạng thái</option>
+            <option value="PENDING">Chưa duyệt</option>
+            <option value="ISSUED">Đã cấp</option>
+            <option value="DENIED">Từ chối</option>
+          </select>
+          <select id="cert-request-subject-filter" onchange="renderCertRequests(window.lastCertRequests || [])">
+            <option value="">Tất cả chủ thể</option>
+            <option value="officer">Officer</option>
+            <option value="thirdparty">Third party</option>
+          </select>
+          <select id="cert-request-profile-filter" onchange="renderCertRequests(window.lastCertRequests || [])">
+            <option value="">Tất cả loại cert</option>
+            <option value="mtls_client">Chứng chỉ truy cập</option>
+          </select>
+        </div>
         <button class="btn" onclick="listCertRequests()">Tải yêu cầu</button>
         <div id="cert-requests-list"></div>
       </div>
@@ -190,36 +207,55 @@
         const response = await fetch(`${API_URL}/api/storage/officer-cert-requests`, { headers: pkiAuthHeaders() });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || 'Không thể tải yêu cầu');
-        const renewal = (data.requests || []).filter(r => {
+        window.lastCertRequests = data.requests || [];
+        renderCertRequests(window.lastCertRequests);
+      } catch (e) {
+        document.getElementById('cert-requests-list').innerHTML = `<div class="alert error">${e.message}</div>`;
+      }
+    }
+
+    function renderCertRequests(requests) {
+        const statusFilter = document.getElementById('cert-request-status-filter')?.value || '';
+        const subjectFilter = document.getElementById('cert-request-subject-filter')?.value || '';
+        const profileFilter = document.getElementById('cert-request-profile-filter')?.value || '';
+        const filtered = (requests || []).filter(r => {
+          if (statusFilter && r.status !== statusFilter) return false;
+          if (subjectFilter && (r.subject_type || 'officer') !== subjectFilter) return false;
+          if (profileFilter && (r.cert_profile || 'mtls_client') !== profileFilter) return false;
+          return true;
+        });
+        const renewal = filtered.filter(r => {
           try {
             const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata;
             return meta && meta.renewal === true;
           } catch { return false; }
         });
-        const initial = (data.requests || []).filter(r => !renewal.includes(r));
+        const initial = filtered.filter(r => !renewal.includes(r));
         let html = '';
         if (initial.length) {
-          html += '<h3 style="margin-top:12px">Cấp mới</h3><table><tr><th>Yêu cầu</th><th>Cán bộ</th><th>Tổ chức</th><th>Trạng thái</th><th></th></tr>';
+          html += '<h3 style="margin-top:12px">Cấp chứng chỉ truy cập</h3><table><tr><th>Yêu cầu</th><th>Loại chứng chỉ</th><th>Chủ thể</th><th>Tổ chức</th><th>Trạng thái</th><th></th></tr>';
           initial.forEach(r => {
             const officer = officerDirectory.find(o => o.officer_id === r.officer_id);
-            const officerLabel = officer?.name || r.officer_id;
-            html += `<tr><td>${r.request_id.slice(0, 8)}…</td><td>${officerLabel}</td><td>${r.organization || '—'}</td><td>${r.status}</td><td>${r.status === 'PENDING' ? `<button class="btn" onclick="approveCertRequest('${r.request_id}')">Duyệt</button> <button class="btn danger" onclick="denyCertRequest('${r.request_id}')">Từ chối</button>` : '—'}</td></tr>`;
+            const subjectType = r.subject_type || 'officer';
+            const subjectId = r.subject_id || r.officer_id;
+            const subjectLabel = subjectType === 'officer' ? (officer?.name || subjectId) : subjectId;
+            const profileLabel = (r.cert_profile || 'mtls_client') === 'mtls_client' ? 'Chứng chỉ truy cập' : 'Chứng chỉ nghiệp vụ';
+            html += `<tr><td>${r.request_id.slice(0, 8)}…</td><td>${profileLabel}</td><td>${subjectLabel}</td><td>${r.organization || '—'}</td><td>${r.status}</td><td>${r.status === 'PENDING' ? `<button class="btn" onclick="approveCertRequest('${r.request_id}')">Duyệt</button> <button class="btn danger" onclick="denyCertRequest('${r.request_id}')">Từ chối</button>` : '—'}</td></tr>`;
           });
           html += '</table>';
         }
         if (renewal.length) {
-          html += '<h3 style="margin-top:20px">Gia hạn</h3><table><tr><th>Yêu cầu</th><th>Cán bộ</th><th>Trạng thái</th><th></th></tr>';
+          html += '<h3 style="margin-top:20px">Gia hạn</h3><table><tr><th>Yêu cầu</th><th>Loại</th><th>Chủ thể</th><th>Trạng thái</th><th></th></tr>';
           renewal.forEach(r => {
             const officer = officerDirectory.find(o => o.officer_id === r.officer_id);
-            html += `<tr><td>${r.request_id.slice(0, 8)}…</td><td>${officer?.name || r.officer_id}</td><td>${r.status}</td><td>${r.status === 'PENDING' ? `<button class="btn" onclick="approveCertRequest('${r.request_id}')">Duyệt</button> <button class="btn danger" onclick="denyCertRequest('${r.request_id}')">Từ chối</button>` : '—'}</td></tr>`;
+            const subjectType = r.subject_type || 'officer';
+            const subjectId = r.subject_id || r.officer_id;
+            html += `<tr><td>${r.request_id.slice(0, 8)}…</td><td>${subjectType}</td><td>${officer?.name || subjectId}</td><td>${r.status}</td><td>${r.status === 'PENDING' ? `<button class="btn" onclick="approveCertRequest('${r.request_id}')">Duyệt</button> <button class="btn danger" onclick="denyCertRequest('${r.request_id}')">Từ chối</button>` : '—'}</td></tr>`;
           });
           html += '</table>';
         }
         if (!html) html = '<div class="alert info">Không có yêu cầu nào.</div>';
         document.getElementById('cert-requests-list').innerHTML = html;
-      } catch (e) {
-        document.getElementById('cert-requests-list').innerHTML = `<div class="alert error">${e.message}</div>`;
-      }
     }
 
     async function approveCertRequest(requestId) {

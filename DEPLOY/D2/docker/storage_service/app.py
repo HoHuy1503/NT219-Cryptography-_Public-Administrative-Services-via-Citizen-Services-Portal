@@ -27,6 +27,7 @@ from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from jwt_auth import JWT_ALG, JWT_TTL_SECONDS, create_session_token, ensure_jwt_keys, ensure_jwks_file, load_jwks_document, verify_session_token
 
@@ -43,6 +44,24 @@ except ImportError:
 def _compact_qr_payload(qr_payload: str) -> str:
     """Keep QR payload unchanged in signature-first mode."""
     return qr_payload
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256((value or "").encode("utf-8")).hexdigest()
+
+
+def _new_document_qr_payload(qr_id: str, token: str) -> str:
+    # Opaque QR payload: short enough for QR, no signature/cert/document hash leakage.
+    return f"GVP1.{qr_id}.{token}"
+
+
+def _parse_document_qr_payload(qr_payload: str):
+    value = (qr_payload or "").strip()
+    if value.startswith("GVP1."):
+        parts = value.split(".", 2)
+        if len(parts) == 3 and parts[1] and parts[2]:
+            return {"version": "GVP1", "qr_id": parts[1], "token": parts[2]}
+    return None
 
 
 def _build_pkcs7_envelope(signature_value_b64: str, signature_algorithm: str, signed_at_iso: str, cert_pem=None) -> str:
@@ -317,6 +336,41 @@ def ensure_schema():
     conn = get_db_connection(retries=10, initial_delay=1.0)
     cur = conn.cursor()
     try:
+        # Base identity tables must exist before document tables add FKs to them.
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS citizens (
+                citizen_id TEXT PRIMARY KEY,
+                email TEXT UNIQUE,
+                name TEXT NOT NULL,
+                password_hash TEXT,
+                password_salt TEXT,
+                phone TEXT,
+                region_code TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_login TIMESTAMPTZ,
+                verified BOOLEAN NOT NULL DEFAULT FALSE,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS officers (
+                officer_id TEXT PRIMARY KEY,
+                email TEXT UNIQUE,
+                name TEXT NOT NULL,
+                password_hash TEXT,
+                password_salt TEXT,
+                department TEXT,
+                phone TEXT,
+                region_code TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_login TIMESTAMPTZ,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """
+        )
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS documents (
@@ -638,6 +692,9 @@ def ensure_schema():
                 document_type TEXT NOT NULL,
                 key_b64 TEXT NOT NULL,
                 encrypted_data TEXT NOT NULL,
+                token_hash TEXT,
+                content_hash TEXT,
+                sig_hash TEXT,
                 metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 created_by TEXT,
@@ -656,6 +713,77 @@ def ensure_schema():
             """
             CREATE INDEX IF NOT EXISTS ix_document_qr_created_at
             ON document_qr (created_at)
+            """
+        )
+        cur.execute("ALTER TABLE document_qr ADD COLUMN IF NOT EXISTS token_hash TEXT")
+        cur.execute("ALTER TABLE document_qr ADD COLUMN IF NOT EXISTS content_hash TEXT")
+        cur.execute("ALTER TABLE document_qr ADD COLUMN IF NOT EXISTS sig_hash TEXT")
+        cur.execute("ALTER TABLE document_qr ADD COLUMN IF NOT EXISTS key_b64 TEXT")
+        cur.execute("ALTER TABLE document_qr ALTER COLUMN key_b64 DROP NOT NULL")
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_document_qr_token_hash
+            ON document_qr (token_hash)
+            WHERE token_hash IS NOT NULL
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS identity_cert_requests (
+                request_id TEXT PRIMARY KEY,
+                subject_type TEXT NOT NULL,
+                subject_id TEXT NOT NULL,
+                public_key_pem TEXT NOT NULL,
+                key_algorithm TEXT,
+                cert_profile TEXT NOT NULL DEFAULT 'mtls_client',
+                common_name TEXT,
+                organization TEXT,
+                country TEXT,
+                st TEXT,
+                l TEXT,
+                ou TEXT,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                cert_id TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                reviewed_at TIMESTAMPTZ,
+                reviewed_by TEXT,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """
+        )
+        cur.execute("ALTER TABLE identity_cert_requests ADD COLUMN IF NOT EXISTS key_algorithm TEXT")
+        cur.execute("ALTER TABLE identity_cert_requests ADD COLUMN IF NOT EXISTS cert_profile TEXT NOT NULL DEFAULT 'mtls_client'")
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS ix_identity_cert_requests_subject_status
+            ON identity_cert_requests (subject_type, subject_id, status, created_at DESC)
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS identity_certificates (
+                cert_id TEXT PRIMARY KEY,
+                subject_type TEXT NOT NULL,
+                subject_id TEXT NOT NULL,
+                cert_pem TEXT NOT NULL,
+                public_key_pem TEXT NOT NULL,
+                thumbprint TEXT NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                revoked_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL,
+                p12_downloaded_at TIMESTAMPTZ,
+                p12_downloaded_by TEXT,
+                download_nonce_hash TEXT,
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_identity_certs_one_active
+            ON identity_certificates (subject_type, subject_id)
+            WHERE is_active = TRUE
             """
         )
         conn.commit()
@@ -755,6 +883,19 @@ def _validate_ml_dsa_public_key(public_key_pem: str):
     if "mldsa" in key_name or "ml_dsa" in key_name:
         return True, None
     return False, "Only ML-DSA public keys are supported"
+
+
+def _validate_ec_public_key(public_key_pem: str):
+    try:
+        public_key = load_pem_public_key(public_key_pem.encode("utf-8"))
+    except Exception:
+        return False, "Invalid EC public key PEM"
+    if not isinstance(public_key, ec.EllipticCurvePublicKey):
+        return False, "mTLS client certificates require an EC public key"
+    curve_name = getattr(public_key.curve, "name", "")
+    if curve_name not in {"secp256r1", "secp384r1"}:
+        return False, "Only P-256 or P-384 EC public keys are supported for mTLS"
+    return True, None
 
 
 def write_audit(action, actor_id, resource_type, resource_id, status="SUCCESS", details=None, error_message=None):
@@ -1455,7 +1596,7 @@ def complete_document_sign_request(request_id):
             if not active_cert:
                 return jsonify({"error": "Officer has no active certificate. Signing is blocked."}), 403
 
-        cur.execute("SELECT request_id, citizen_id, officer_id, status, doc_id FROM document_sign_requests WHERE request_id = %s", (request_id,))
+        cur.execute("SELECT request_id, citizen_id, officer_id, status, doc_id, content_hash FROM document_sign_requests WHERE request_id = %s", (request_id,))
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "Request not found"}), 404
@@ -1531,30 +1672,34 @@ def complete_document_sign_request(request_id):
             )
             
             # Generate QR after successful signing
+            qr_payload_for_response = None
             try:
                 if signature_b64:
                     sig_hash = hashlib.sha256(
                         signature_pkcs7_b64.encode("utf-8")
                     ).hexdigest()
                     signed_at_text = signed_at_iso
-                    signed_at_qr = str(int(datetime.now(timezone.utc).timestamp()))
-                    qr_content = f"{sig_hash}|{signed_by}|{signed_at_qr}|{row.get('citizen_id')}|{doc_id}|"
+                    qr_id = f"qr-{uuid.uuid4().hex[:12]}"
+                    qr_token = secrets.token_urlsafe(24)
+                    qr_content = _new_document_qr_payload(qr_id, qr_token)
+                    qr_payload_for_response = qr_content
                     qr_metadata = {
+                        "format": "GVP1",
                         "citizen_id": row.get("citizen_id"),
                         "doc_id": doc_id,
                         "timestamp": signed_at_text,
                         "signature_algorithm": signature_algorithm,
                         "officer_id": signed_by,
                         "signed_by": signed_by,
+                        "signature_key_version": key_version,
                     }
-                    qr_id = f"qr-{uuid.uuid4().hex[:12]}"
                     cur.execute(
                         """
-                        INSERT INTO document_qr (qr_id, document_id, document_type, sig_hash, encrypted_data, metadata, created_by)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO document_qr (qr_id, document_id, document_type, sig_hash, content_hash, token_hash, encrypted_data, metadata, created_by)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (qr_id) DO NOTHING
                         """,
-                        (qr_id, doc_id, "signed_document", sig_hash, qr_content, json.dumps(qr_metadata), signed_by),
+                        (qr_id, doc_id, "signed_document", sig_hash, row.get("content_hash") if row else None, _sha256_text(qr_token), qr_content, json.dumps(qr_metadata), signed_by),
                     )
                     conn.commit()
                     logger.info(f"Generated QR {qr_id} for signed document {doc_id}")
@@ -1570,7 +1715,10 @@ def complete_document_sign_request(request_id):
             request_id,
             details={"officer_id": row.get("officer_id"), "citizen_id": row.get("citizen_id"), "doc_id": row.get("doc_id")},
         )
-        return jsonify({"request_id": request_id, "status": "signed", "signed_by": signed_by}), 200
+        response_payload = {"request_id": request_id, "status": "signed", "signed_by": signed_by}
+        if qr_payload_for_response:
+            response_payload["qr_payload"] = qr_payload_for_response
+        return jsonify(response_payload), 200
     except Exception as exc:
         conn.rollback()
         logger.error("complete_document_sign_request failed: %s", exc)
@@ -1792,9 +1940,14 @@ def create_storage_admin_blocked():
 
 @app.route("/api/storage/register/officer", methods=["POST"])
 def register_officer():
-    """Registration endpoint for OFFICER accounts with immediate certificate request."""
+    """Registration endpoint for OFFICER accounts.
+
+    Officer has two independent keys:
+    - EC key: browser/client mTLS identity certificate.
+    - ML-DSA key: business document signing.
+    """
     data = request.get_json(force=True)
-    required = ["officer_id", "email", "name", "password", "public_key_pem"]
+    required = ["officer_id", "email", "name", "password"]
     missing = [field for field in required if not data.get(field)]
     if missing:
         return jsonify({"error": f"Missing field: {missing[0]}"}), 400
@@ -1804,7 +1957,8 @@ def register_officer():
     password = data["password"]
     department = data.get("department", "")
     region_code = data.get("region_code")
-    public_key_pem = data.get("public_key_pem", "").strip()
+    mtls_public_key_pem = (data.get("mtls_public_key_pem") or data.get("public_key_pem") or "").strip()
+    signing_public_key_pem = (data.get("signing_public_key_pem") or data.get("public_key_pem") or "").strip()
     subject_st = (data.get("st") or "HCM").strip()
     subject_l = (data.get("l") or "Q12").strip()
     subject_ou = (data.get("ou") or f"CA {subject_l}").strip()
@@ -1814,10 +1968,16 @@ def register_officer():
         return jsonify({"error": "officer_id must be alphanumeric"}), 400
     if len(password) < 8:
         return jsonify({"error": "Password must be at least 8 characters"}), 400
-    if not public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
-        return jsonify({"error": "public_key_pem must be a valid PEM public key"}), 400
+    if not mtls_public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
+        return jsonify({"error": "mtls_public_key_pem must be a valid PEM public key"}), 400
+    if not signing_public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
+        return jsonify({"error": "signing_public_key_pem must be a valid PEM public key"}), 400
 
-    is_valid_key, validation_error = _validate_ml_dsa_public_key(public_key_pem)
+    is_valid_key, validation_error = _validate_ec_public_key(mtls_public_key_pem)
+    if not is_valid_key:
+        return jsonify({"error": validation_error}), 400
+
+    is_valid_key, validation_error = _validate_ml_dsa_public_key(signing_public_key_pem)
     if not is_valid_key:
         return jsonify({"error": validation_error}), 400
 
@@ -1845,7 +2005,7 @@ def register_officer():
             INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version)
             VALUES (%s, %s, %s, %s, TRUE, NOW(), NOW() + INTERVAL '365 days', 1)
             """,
-            (key_id, officer_id, public_key_pem, "ML-DSA-44"),
+            (key_id, officer_id, signing_public_key_pem, "ML-DSA-44"),
         )
         conn.commit()
 
@@ -1855,6 +2015,26 @@ def register_officer():
             "INSERT INTO officer_cert_requests (request_id, officer_id, public_key_pem, common_name, organization, country, st, l, ou, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (request_id, officer_id, public_key_pem, subject_ou, 'OFFICER', 'VN', subject_st, subject_l, subject_ou, 'PENDING')
         )
+        cur.execute(
+            """
+            INSERT INTO identity_cert_requests
+              (request_id, subject_type, subject_id, public_key_pem, key_algorithm, cert_profile, common_name, organization, country, st, l, ou, status, metadata)
+            VALUES (%s, 'officer', %s, %s, 'EC-P384', 'mtls_client', %s, %s, %s, %s, %s, %s, 'PENDING', %s)
+            ON CONFLICT (request_id) DO NOTHING
+            """,
+            (
+                request_id,
+                officer_id,
+                mtls_public_key_pem,
+                subject_ou,
+                "OFFICER",
+                "VN",
+                subject_st,
+                subject_l,
+                subject_ou,
+                Json({"legacy_table": "officer_cert_requests", "key_id": key_id}),
+            ),
+        )
         conn.commit()
         write_audit("OFFICER_REGISTER", officer_id, "OFFICER", officer_id, details={"email": email, "department": department, "request_id": request_id, "key_id": key_id})
         return jsonify({
@@ -1863,6 +2043,7 @@ def register_officer():
             "department": department,
             "key_id": key_id,
             "request_id": request_id,
+            "cert_profile": "mtls_client",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "message": "Officer account created. Certificate request pending PKI approval."
         }), 201
@@ -1877,9 +2058,9 @@ def register_officer():
 
 @app.route("/api/storage/register/thirdparty", methods=["POST"])
 def register_thirdparty():
-    """Registration endpoint for THIRDPARTY accounts (self-registration)."""
+    """Registration endpoint for THIRDPARTY accounts with pending PKI certificate request."""
     data = request.get_json(force=True)
-    required = ["thirdparty_id", "email", "org_name", "password"]
+    required = ["thirdparty_id", "email", "org_name", "password", "public_key_pem"]
     missing = [field for field in required if not data.get(field)]
     if missing:
         return jsonify({"error": f"Missing field: {missing[0]}"}), 400
@@ -1889,18 +2070,28 @@ def register_thirdparty():
     password = data["password"]
     org_name = data.get("org_name", "")
     contact_person = data.get("contact_person")
+    mtls_public_key_pem = (data.get("mtls_public_key_pem") or data.get("public_key_pem") or "").strip()
+    subject_st = (data.get("st") or "HCM").strip()
+    subject_l = (data.get("l") or "Q12").strip()
+    subject_ou = (data.get("ou") or org_name or thirdparty_id).strip()
     
     # Validate
     if not thirdparty_id.replace("_", "").replace("-", "").isalnum():
         return jsonify({"error": "thirdparty_id must be alphanumeric"}), 400
     if len(password) < 8:
         return jsonify({"error": "Password must be at least 8 characters"}), 400
+    if not mtls_public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
+        return jsonify({"error": "mtls_public_key_pem must be a valid PEM public key"}), 400
+
+    is_valid_key, validation_error = _validate_ec_public_key(mtls_public_key_pem)
+    if not is_valid_key:
+        return jsonify({"error": validation_error}), 400
 
     pwd_hash, salt = hash_password(password)
 
     ensure_schema()
     conn = get_db_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         # Check if already exists
         cur.execute("SELECT thirdparty_id FROM thirdparty_users WHERE thirdparty_id = %s OR email = %s", (thirdparty_id, email))
@@ -1912,14 +2103,34 @@ def register_thirdparty():
             "INSERT INTO thirdparty_users (thirdparty_id, email, org_name, contact_person, password_hash, password_salt) VALUES (%s, %s, %s, %s, %s, %s)",
             (thirdparty_id, email, org_name, contact_person, pwd_hash, salt),
         )
+        request_id = f"certreq-{uuid.uuid4().hex[:12]}"
+        cur.execute(
+            """
+            INSERT INTO identity_cert_requests
+              (request_id, subject_type, subject_id, public_key_pem, key_algorithm, cert_profile, common_name, organization, country, st, l, ou, status, metadata)
+            VALUES (%s, 'thirdparty', %s, %s, 'EC-P384', 'mtls_client', %s, %s, 'VN', %s, %s, %s, 'PENDING', %s)
+            """,
+            (
+                request_id,
+                thirdparty_id,
+                mtls_public_key_pem,
+                subject_ou,
+                org_name,
+                subject_st,
+                subject_l,
+                subject_ou,
+                Json({"contact_person": contact_person}),
+            ),
+        )
         conn.commit()
-        write_audit("THIRDPARTY_REGISTER", thirdparty_id, "THIRDPARTY", thirdparty_id, details={"email": email, "org_name": org_name})
+        write_audit("THIRDPARTY_REGISTER", thirdparty_id, "THIRDPARTY", thirdparty_id, details={"email": email, "org_name": org_name, "request_id": request_id})
         return jsonify({
             "thirdparty_id": thirdparty_id,
             "email": email,
             "org_name": org_name,
+            "request_id": request_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "message": "Third-party account created."
+            "message": "Third-party account created. Certificate request pending PKI approval."
         }), 201
     except Exception as exc:
         conn.rollback()
@@ -2194,18 +2405,75 @@ def get_officer(officer_id):
         conn.close()
 
 
+def _identity_owner_allowed(subject_type, subject_id):
+    return g.current_user_type == subject_type and g.current_user_id == subject_id
+
+
+def _store_identity_cert(cur, subject_type, subject_id, cert_id, cert_pem, public_key_pem, not_after, metadata=None):
+    cert_obj = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
+    cert_der = cert_obj.public_bytes(serialization.Encoding.DER)
+    thumbprint = hashlib.sha256(cert_der).hexdigest()
+    cur.execute(
+        """
+        UPDATE identity_certificates
+        SET is_active = FALSE, revoked_at = NOW()
+        WHERE subject_type = %s AND subject_id = %s AND is_active = TRUE
+        """,
+        (subject_type, subject_id),
+    )
+    cur.execute(
+        """
+        INSERT INTO identity_certificates
+          (cert_id, subject_type, subject_id, cert_pem, public_key_pem, thumbprint, is_active, created_at, expires_at, metadata)
+        VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW(), %s, %s)
+        ON CONFLICT (cert_id) DO UPDATE SET
+          cert_pem = EXCLUDED.cert_pem,
+          public_key_pem = EXCLUDED.public_key_pem,
+          thumbprint = EXCLUDED.thumbprint,
+          is_active = TRUE,
+          expires_at = EXCLUDED.expires_at,
+          metadata = EXCLUDED.metadata
+        """,
+        (cert_id, subject_type, subject_id, cert_pem, public_key_pem, thumbprint, not_after, Json(metadata or {})),
+    )
+    return thumbprint
+
+
+def _list_identity_certs_for_subject(cur, subject_type, subject_id):
+    cur.execute(
+        """
+        SELECT cert_id, subject_type, subject_id, cert_pem, thumbprint, is_active, revoked_at,
+               created_at, expires_at, p12_downloaded_at
+        FROM identity_certificates
+        WHERE subject_type = %s AND subject_id = %s
+        ORDER BY is_active DESC, created_at DESC
+        """,
+        (subject_type, subject_id),
+    )
+    return cur.fetchall()
+
+
 @app.route("/api/storage/officer-cert-requests", methods=["GET"])
 @require_auth
 @require_user_type("pki_admin")
 def list_officer_cert_requests():
-    """PKI admins can list pending certificate requests for officers."""
+    """PKI admins can list pending certificate requests for officers and third parties."""
     limit = min(int(request.args.get("limit", 100)), 500)
     offset = int(request.args.get("offset", 0))
     ensure_schema()
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        cur.execute("SELECT request_id, officer_id, common_name, organization, country, st, l, ou, status, cert_id, created_at, reviewed_at, reviewed_by FROM officer_cert_requests ORDER BY created_at DESC LIMIT %s OFFSET %s", (limit, offset))
+        cur.execute(
+            """
+            SELECT request_id, subject_type, subject_id, subject_id AS officer_id,
+                   key_algorithm, cert_profile, common_name, organization, country, st, l, ou, status, cert_id,
+                   created_at, reviewed_at, reviewed_by, metadata
+            FROM identity_cert_requests
+            ORDER BY created_at DESC LIMIT %s OFFSET %s
+            """,
+            (limit, offset),
+        )
         rows = cur.fetchall()
         return jsonify({"requests": [dict(r) for r in rows], "count": len(rows)}), 200
     finally:
@@ -2217,12 +2485,12 @@ def list_officer_cert_requests():
 @require_auth
 @require_user_type("pki_admin")
 def approve_officer_cert_request(request_id):
-    """Approve a certificate request: call PKI to issue cert and store it. For renewals, expire old key and mark related documents as expired."""
+    """Approve a certificate request: call PKI to issue cert and store it for one-time download."""
     ensure_schema()
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        cur.execute("SELECT * FROM officer_cert_requests WHERE request_id = %s", (request_id,))
+        cur.execute("SELECT * FROM identity_cert_requests WHERE request_id = %s", (request_id,))
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "Request not found"}), 404
@@ -2237,17 +2505,23 @@ def approve_officer_cert_request(request_id):
             metadata = metadata_raw or {}
         is_renewal = metadata.get("renewal", False)
         old_key_id = metadata.get("current_key_id")
+        subject_type = row.get("subject_type") or "officer"
+        subject_id = row.get("subject_id") or row.get("officer_id")
 
         # Call PKI service to issue certificate
         payload = {
-            "officer_id": row["officer_id"],
-            "common_name": row.get("common_name") or row.get("ou") or row.get("officer_id"),
-            "organization": row.get("organization") or 'OFFICER',
+            "subject_id": subject_id,
+            "subject_type": subject_type,
+            "officer_id": subject_id if subject_type == "officer" else None,
+            "common_name": row.get("common_name") or row.get("ou") or subject_id,
+            "organization": row.get("organization") or subject_type.upper(),
             "country": row.get("country") or 'VN',
             "st": row.get("st"),
             "l": row.get("l"),
             "ou": row.get("ou"),
-            "purpose": 'officer_identity',
+            "purpose": f"{subject_type}_identity",
+            "cert_profile": row.get("cert_profile") or "mtls_client",
+            "key_algorithm": row.get("key_algorithm"),
             "public_key_pem": row.get("public_key_pem"),
             "allow_reissue": True,
         }
@@ -2266,18 +2540,15 @@ def approve_officer_cert_request(request_id):
         if not cert_id or not cert_pem:
             return jsonify({"error": "PKI response missing certificate data"}), 502
 
-        from cryptography import x509
-        from cryptography.hazmat.primitives import serialization
-        cert_obj = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
-        cert_der = cert_obj.public_bytes(serialization.Encoding.DER)
-        thumbprint = hashlib.sha256(cert_der).hexdigest()
+        thumbprint = hashlib.sha256(
+            x509.load_pem_x509_certificate(cert_pem.encode("utf-8")).public_bytes(serialization.Encoding.DER)
+        ).hexdigest()
 
-        # For renewals: deactivate old certificate and mark documents as expired
-        if is_renewal:
+        if is_renewal and subject_type == "officer":
             # Mark old certificate as inactive
             cur.execute(
                 "UPDATE officer_certificates SET is_active = FALSE, revoked_at = NOW() WHERE officer_id = %s AND is_active = TRUE",
-                (row["officer_id"],)
+                (subject_id,)
             )
             
             # Mark old key as not current
@@ -2294,52 +2565,55 @@ def approve_officer_cert_request(request_id):
                 SET status = 'expired'
                 WHERE signed_by = %s AND status = 'signed'
                 """,
-                (row["officer_id"],)
+                (subject_id,)
             )
 
         # Mark new key as current for renewal
-        if is_renewal:
+        if is_renewal and subject_type == "officer":
             cur.execute(
                 "UPDATE officer_keys SET is_current = FALSE WHERE officer_id = %s AND is_current = TRUE",
-                (row["officer_id"],)
+                (subject_id,)
             )
-            key_id = f"key-{row['officer_id']}-{uuid.uuid4().hex[:8]}"
+            key_id = f"key-{subject_id}-{uuid.uuid4().hex[:8]}"
             cur.execute(
                 """
                 INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version)
                 VALUES (%s, %s, %s, %s, TRUE, NOW(), NOW() + INTERVAL '365 days', 
                     (SELECT COALESCE(MAX(key_version), 0) + 1 FROM officer_keys WHERE officer_id = %s))
                 """,
-                (key_id, row["officer_id"], row.get("public_key_pem"), "ML-DSA-44", row["officer_id"])
+                (key_id, subject_id, row.get("public_key_pem"), "ML-DSA-44", subject_id)
             )
 
-        # Store/update certificate
-        cur.execute(
-            """
-            INSERT INTO officer_certificates (cert_id, officer_id, cert_pem, thumbprint, is_active, created_at, expires_at) 
-            VALUES (%s, %s, %s, %s, TRUE, NOW(), %s) 
-            ON CONFLICT (cert_id) DO UPDATE SET 
-                officer_id = EXCLUDED.officer_id, 
-                cert_pem = EXCLUDED.cert_pem, 
-                thumbprint = EXCLUDED.thumbprint, 
-                is_active = TRUE, 
-                created_at = NOW(), 
-                expires_at = EXCLUDED.expires_at
-            """,
-            (cert_id, row["officer_id"], cert_pem, thumbprint, not_after)
-        )
+        _store_identity_cert(cur, subject_type, subject_id, cert_id, cert_pem, row.get("public_key_pem"), not_after, {"request_id": request_id})
+
+        if subject_type == "officer":
+            cur.execute(
+                """
+                INSERT INTO officer_certificates (cert_id, officer_id, cert_pem, thumbprint, is_active, created_at, expires_at)
+                VALUES (%s, %s, %s, %s, TRUE, NOW(), %s)
+                ON CONFLICT (cert_id) DO UPDATE SET
+                    officer_id = EXCLUDED.officer_id,
+                    cert_pem = EXCLUDED.cert_pem,
+                    thumbprint = EXCLUDED.thumbprint,
+                    is_active = TRUE,
+                    created_at = NOW(),
+                    expires_at = EXCLUDED.expires_at
+                """,
+                (cert_id, subject_id, cert_pem, thumbprint, not_after)
+            )
 
         # Update request
+        cur.execute("UPDATE identity_cert_requests SET status = %s, cert_id = %s, reviewed_at = NOW(), reviewed_by = %s WHERE request_id = %s", ('ISSUED', cert_id, getattr(g, 'current_user_id', 'pki_admin'), request_id))
         cur.execute("UPDATE officer_cert_requests SET status = %s, cert_id = %s, reviewed_at = NOW(), reviewed_by = %s WHERE request_id = %s", ('ISSUED', cert_id, getattr(g, 'current_user_id', 'pki_admin'), request_id))
         conn.commit()
         
-        audit_details = {"cert_id": cert_id, "officer_id": row["officer_id"]}
+        audit_details = {"cert_id": cert_id, "subject_type": subject_type, "subject_id": subject_id}
         if is_renewal:
             audit_details["renewal"] = True
             audit_details["expired_documents"] = "marked as expired"
         write_audit("CERT_ISSUED", getattr(g, 'current_user_id', 'pki_admin'), "CERT_REQUEST", request_id, details=audit_details)
 
-        return jsonify({"request_id": request_id, "cert_id": cert_id, "officer_id": row["officer_id"], "certificate": cert_pem, "renewal": is_renewal}), 200
+        return jsonify({"request_id": request_id, "cert_id": cert_id, "subject_type": subject_type, "subject_id": subject_id, "certificate": cert_pem, "renewal": is_renewal}), 200
     except Exception as exc:
         conn.rollback()
         logger.error("approve_officer_cert_request failed: %s", exc)
@@ -2357,12 +2631,13 @@ def deny_officer_cert_request(request_id):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        cur.execute("SELECT request_id, officer_id, status FROM officer_cert_requests WHERE request_id = %s", (request_id,))
+        cur.execute("SELECT request_id, subject_type, subject_id, subject_id AS officer_id, status FROM identity_cert_requests WHERE request_id = %s", (request_id,))
         row = cur.fetchone()
         if not row:
             return jsonify({"error": "Request not found"}), 404
         if row["status"] != 'PENDING':
             return jsonify({"error": "Request not in pending state"}), 400
+        cur.execute("UPDATE identity_cert_requests SET status = %s, reviewed_at = NOW(), reviewed_by = %s WHERE request_id = %s", ('DENIED', getattr(g, 'current_user_id', 'pki_admin'), request_id))
         cur.execute("UPDATE officer_cert_requests SET status = %s, reviewed_at = NOW(), reviewed_by = %s WHERE request_id = %s", ('DENIED', getattr(g, 'current_user_id', 'pki_admin'), request_id))
         conn.commit()
         write_audit("CERT_REQUEST_DENIED", getattr(g, 'current_user_id', 'pki_admin'), "CERT_REQUEST", request_id, details={"officer_id": row["officer_id"]})
@@ -2579,9 +2854,10 @@ def get_officer_certificates(officer_id):
     try:
         cur.execute(
             """
-            SELECT cert_id, officer_id, cert_pem, thumbprint, is_active, revoked_at, created_at, expires_at
-            FROM officer_certificates
-            WHERE officer_id = %s
+            SELECT cert_id, subject_id AS officer_id, cert_pem, thumbprint, is_active, revoked_at,
+                   created_at, expires_at, p12_downloaded_at
+            FROM identity_certificates
+            WHERE subject_type = 'officer' AND subject_id = %s
             ORDER BY is_active DESC, created_at DESC
             """,
             (officer_id,)
@@ -2598,11 +2874,101 @@ def get_officer_certificates(officer_id):
                 "created_at": cert.get("created_at"),
                 "expires_at": cert.get("expires_at"),
                 "revoked_at": cert.get("revoked_at"),
+                "downloaded": bool(cert.get("p12_downloaded_at")),
+                "p12_downloaded_at": cert.get("p12_downloaded_at"),
                 "cert_pem": cert.get("cert_pem")
             })
         return jsonify({"officer_id": officer_id, "certificates": result, "count": len(result)}), 200
     except Exception as exc:
         logger.error("get_officer_certificates failed: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/api/storage/identity-certificates", methods=["GET"])
+@require_auth
+def list_my_identity_certificates():
+    subject_type = request.args.get("subject_type") or g.current_user_type
+    subject_id = request.args.get("subject_id") or g.current_user_id
+    if g.current_user_type != "pki_admin" and not _identity_owner_allowed(subject_type, subject_id):
+        return jsonify({"error": "Forbidden"}), 403
+    ensure_schema()
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        certs = _list_identity_certs_for_subject(cur, subject_type, subject_id)
+        return jsonify({
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+            "certificates": [
+                {
+                    "cert_id": cert.get("cert_id"),
+                    "subject_type": cert.get("subject_type"),
+                    "subject_id": cert.get("subject_id"),
+                    "thumbprint": cert.get("thumbprint"),
+                    "is_active": cert.get("is_active"),
+                    "status": "active" if cert.get("is_active") else "revoked",
+                    "created_at": cert.get("created_at"),
+                    "expires_at": cert.get("expires_at"),
+                    "revoked_at": cert.get("revoked_at"),
+                    "downloaded": bool(cert.get("p12_downloaded_at")),
+                    "p12_downloaded_at": cert.get("p12_downloaded_at"),
+                }
+                for cert in certs
+            ],
+            "count": len(certs),
+        }), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/api/storage/identity-certificates/<cert_id>/download", methods=["GET"])
+@require_auth
+def download_identity_certificate_once(cert_id):
+    ensure_schema()
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("SELECT * FROM identity_certificates WHERE cert_id = %s", (cert_id,))
+        cert = cur.fetchone()
+        if not cert:
+            return jsonify({"error": "Certificate not found"}), 404
+        if g.current_user_type != "pki_admin" and not _identity_owner_allowed(cert.get("subject_type"), cert.get("subject_id")):
+            return jsonify({"error": "Forbidden"}), 403
+        if cert.get("p12_downloaded_at"):
+            return jsonify({
+                "error": "Certificate credential was already downloaded once",
+                "downloaded_at": cert.get("p12_downloaded_at"),
+            }), 410
+
+        cur.execute(
+            """
+            UPDATE identity_certificates
+            SET p12_downloaded_at = NOW(), p12_downloaded_by = %s
+            WHERE cert_id = %s AND p12_downloaded_at IS NULL
+            """,
+            (g.current_user_id, cert_id),
+        )
+        if cur.rowcount != 1:
+            conn.rollback()
+            return jsonify({"error": "Certificate credential was already downloaded once"}), 410
+        conn.commit()
+        write_audit("IDENTITY_CERT_DOWNLOAD_ONCE", g.current_user_id, "IDENTITY_CERTIFICATE", cert_id, details={"subject_type": cert.get("subject_type"), "subject_id": cert.get("subject_id")})
+        return jsonify({
+            "cert_id": cert_id,
+            "subject_type": cert.get("subject_type"),
+            "subject_id": cert.get("subject_id"),
+            "certificate_pem": cert.get("cert_pem"),
+            "public_key_pem": cert.get("public_key_pem"),
+            "p12_available": False,
+            "message": "Server only received a public key, so it cannot build a real .p12 with private key. Package this certificate with the local/token private key on the client side.",
+        }), 200
+    except Exception as exc:
+        conn.rollback()
+        logger.error("download_identity_certificate_once failed: %s", exc)
         return jsonify({"error": str(exc)}), 500
     finally:
         cur.close()
@@ -3819,15 +4185,38 @@ def complete_document_verify_request(request_id):
         if not document_base64:
             return jsonify({"error": "Missing document_base64"}), 400
 
-        parts = qr_payload.split("|", 5)
-        if len(parts) < 5:
-            return jsonify({"error": "Invalid QR payload format"}), 400
+        parsed_qr = _parse_document_qr_payload(qr_payload)
+        if parsed_qr:
+            cur.execute(
+                """
+                SELECT qr_id, document_id, sig_hash, content_hash, metadata
+                FROM document_qr
+                WHERE qr_id = %s AND token_hash = %s AND document_type = 'signed_document'
+                LIMIT 1
+                """,
+                (parsed_qr["qr_id"], _sha256_text(parsed_qr["token"])),
+            )
+            qr_record = cur.fetchone()
+            if not qr_record:
+                return jsonify({"error": "QR token is invalid or revoked"}), 400
+            metadata = qr_record.get("metadata") or {}
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata) if metadata else {}
+            qr_blob = qr_record.get("sig_hash")
+            officer_id = metadata.get("officer_id") or metadata.get("signed_by")
+            signed_at = metadata.get("timestamp")
+            requester_id = metadata.get("citizen_id")
+            doc_id = qr_record.get("document_id")
+        else:
+            parts = qr_payload.split("|", 5)
+            if len(parts) < 5:
+                return jsonify({"error": "Invalid QR payload format"}), 400
 
-        qr_blob = parts[0].strip()
-        officer_id = parts[1].strip()
-        signed_at = parts[2].strip()
-        requester_id = parts[3].strip()
-        doc_id = parts[4].strip()
+            qr_blob = parts[0].strip()
+            officer_id = parts[1].strip()
+            signed_at = parts[2].strip()
+            requester_id = parts[3].strip()
+            doc_id = parts[4].strip()
 
         cur.execute("SELECT signature_data, raw_signature_data, signature_algorithm, key_version FROM signatures WHERE doc_id = %s ORDER BY signed_at DESC LIMIT 1", (doc_id,))
         sig_row = cur.fetchone()
@@ -3836,8 +4225,12 @@ def complete_document_verify_request(request_id):
 
         signature_from_db = sig_row.get("signature_data")
         raw_signature_for_verify = sig_row.get("raw_signature_data") or _extract_signature_value(signature_from_db)
-        qr_mode = "signature"
-        if qr_blob != signature_from_db:
+        qr_mode = "opaque_token" if parsed_qr else "signature"
+        actual_sig_hash = hashlib.sha256((signature_from_db or "").encode("utf-8")).hexdigest()
+        if parsed_qr:
+            if qr_blob and qr_blob != actual_sig_hash:
+                return jsonify({"error": "QR signature hash does not match stored signature for document"}), 400
+        elif qr_blob != signature_from_db:
             return jsonify({"error": "QR signature does not match stored signature for document"}), 400
 
         try:
@@ -3846,6 +4239,25 @@ def complete_document_verify_request(request_id):
             return jsonify({"error": f"Invalid document_base64: {exc}"}), 400
 
         doc_hash = hashlib.sha256(document_bytes).hexdigest()
+        if parsed_qr and qr_record.get("content_hash") and qr_record.get("content_hash") != doc_hash:
+            verify_result = {
+                "valid": False,
+                "error": "Tai lieu khong hop le: noi dung tep khong khop voi token QR da ky",
+                "reason": "document_hash_mismatch",
+                "expected_content_hash": qr_record.get("content_hash"),
+                "provided_content_hash": doc_hash,
+            }
+            final_status = "REJECTED"
+            cur.execute(
+                """
+                UPDATE document_verify_requests
+                SET status = %s, verification_result = %s, verified_by = %s
+                WHERE request_id = %s
+                """,
+                (final_status, Json({"doc_service_status": None, "doc_service_result": verify_result, "officer_id": officer_id, "doc_id": doc_id, "citizen_id": requester_id, "qr_payload": qr_payload}), g.current_user_id, request_id),
+            )
+            conn.commit()
+            return jsonify({"request_id": request_id, "status": final_status, "success": False, "officer_id": officer_id, "doc_id": doc_id, "result_details": verify_result}), 200
 
         cur.execute("SELECT content_hash FROM documents WHERE doc_id = %s LIMIT 1", (doc_id,))
         doc_row = cur.fetchone()
@@ -3967,26 +4379,49 @@ def verify_document_qr():
 
         document_base64 = data.get("document_base64", "").strip()
 
-        # Parse QR payload: signature_b64|officer_id|signed_at|requester|doc_id|
-        if "|" not in qr_payload:
-            return jsonify({"error": "Invalid QR payload format"}), 400
-
-        try:
-            parts = qr_payload.split("|")
-            if len(parts) < 5:
-                return jsonify({"error": "Invalid QR payload format"}), 400
-            sig_hash = parts[0].strip()
-            officer_id = parts[1].strip()
-            signed_at = parts[2].strip()
-            requester_citizen_id = parts[3].strip()
-            doc_id = parts[4].strip()
-        except Exception as e:
-            logger.error(f"Failed to parse QR payload: {e}")
-            return jsonify({"error": "Invalid QR payload format"}), 400
-
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
         try:
+            parsed_qr = _parse_document_qr_payload(qr_payload)
+            if parsed_qr:
+                cur.execute(
+                    """
+                    SELECT qr_id, document_id, sig_hash, content_hash, metadata, created_at
+                    FROM document_qr
+                    WHERE qr_id = %s AND token_hash = %s AND document_type = 'signed_document'
+                    LIMIT 1
+                    """,
+                    (parsed_qr["qr_id"], _sha256_text(parsed_qr["token"])),
+                )
+                qr_row = cur.fetchone()
+                if not qr_row:
+                    return jsonify({"success": False, "error": "QR token is invalid or revoked"}), 200
+                cur.execute(
+                    "UPDATE document_qr SET accessed_count = accessed_count + 1, last_accessed_at = NOW() WHERE qr_id = %s",
+                    (parsed_qr["qr_id"],),
+                )
+                conn.commit()
+                metadata = qr_row.get("metadata") or {}
+                if isinstance(metadata, str):
+                    metadata = json.loads(metadata) if metadata else {}
+                doc_id = qr_row.get("document_id")
+                officer_id = metadata.get("officer_id") or metadata.get("signed_by")
+                signed_at = metadata.get("timestamp")
+                requester_citizen_id = metadata.get("citizen_id")
+                sig_hash = qr_row.get("sig_hash")
+            else:
+                # Legacy QR payload: sig_hash|officer_id|signed_at|requester|doc_id|
+                if "|" not in qr_payload:
+                    return jsonify({"error": "Invalid QR payload format"}), 400
+                parts = qr_payload.split("|")
+                if len(parts) < 5:
+                    return jsonify({"error": "Invalid QR payload format"}), 400
+                sig_hash = parts[0].strip()
+                officer_id = parts[1].strip()
+                signed_at = parts[2].strip()
+                requester_citizen_id = parts[3].strip()
+                doc_id = parts[4].strip()
+
             cur.execute(
                 "SELECT signature_data, raw_signature_data, signature_algorithm, key_version FROM signatures WHERE doc_id = %s ORDER BY signed_at DESC LIMIT 1",
                 (doc_id,),
@@ -3995,17 +4430,14 @@ def verify_document_qr():
             if not sig_row:
                 return jsonify({"success": False, "error": "Document signature not found", "officer_id": officer_id}), 200
 
-            qr_mode = "signature"
+            qr_mode = "opaque_token" if parsed_qr else "signature"
             signature_from_db = sig_row.get("signature_data") or ""
             raw_signature_for_verify = (
                 sig_row.get("raw_signature_data")
                 or _extract_signature_value(signature_from_db)
             )
-            actual_sig_hash = hashlib.sha256(
-                signature_from_db.encode("utf-8")
-            ).hexdigest()
-
-            if sig_hash != actual_sig_hash:
+            actual_sig_hash = hashlib.sha256(signature_from_db.encode("utf-8")).hexdigest()
+            if sig_hash and sig_hash != actual_sig_hash:
                 return jsonify({"success": False, "error": "QR signature hash does not match stored signature for document", "officer_id": officer_id}), 200
 
             if sig_row.get("key_version") is None:
@@ -4039,6 +4471,18 @@ def verify_document_qr():
             if document_base64:
                 doc_bytes = base64.b64decode(document_base64)
                 doc_hash = hashlib.sha256(doc_bytes).hexdigest()
+                if parsed_qr and qr_row.get("content_hash") and qr_row.get("content_hash") != doc_hash:
+                    return jsonify({
+                        "success": False,
+                        "officer_id": officer_id,
+                        "error": "Document hash does not match the signed QR record",
+                        "verification_details": {
+                            "document_id": doc_id,
+                            "expected_content_hash": qr_row.get("content_hash"),
+                            "provided_content_hash": doc_hash,
+                            "qr_mode": "opaque_token",
+                        },
+                    }), 200
                 verify_pub_b64 = base64.b64encode(key_record.get("public_key_pem").encode("utf-8")).decode("ascii")
                 verify_response = requests.post(
                     f"{DOC_SERVICE_URL.rstrip('/')}/api/documents/verify",

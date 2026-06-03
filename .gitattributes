@@ -1,9 +1,4 @@
-* text=auto eol=lf
-
-# Keep generated or evidence artifacts byte-for-byte.
-*.enc -text -diff -merge
-*.bin -text -diff -merge
-*.pcap -text -diff -merge
+* text=auto eol=LF
 
 # Certificates are tracked as text, but should still stay LF-normalized.
-*.crt text eol=lf
+*.crt text eol=LF

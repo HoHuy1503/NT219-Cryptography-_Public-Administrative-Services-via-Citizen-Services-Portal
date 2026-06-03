@@ -1,0 +1,13 @@
+﻿Synced at: 2026-06-04T01:17:24
+Server: azureuser@20.205.109.23
+Certificate: citizens.hnh2511.xyz
+
+Public HTTPS cert/key:
+  letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem
+  letsencrypt/live/citizens.hnh2511.xyz/privkey.pem
+
+mTLS browser client material:
+  browser_clients/
+
+Nginx config:
+  nginx/sites-enabled/govportal

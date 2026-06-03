@@ -48,12 +48,12 @@ services:
       - ./state/mtls:/etc/nginx/mtls:ro
     environment:
       - OPENSSL_DIR=/opt/openssl
-      - OPENSSL_BIN=/opt/openssl/apps/openssl
-      - OPENSSL_LIB_DIR=/opt/openssl
-      - OPENSSL_MODULES=/opt/openssl/providers
-      - OPENSSL_CONF=/opt/openssl/apps/openssl.cnf
-      - LD_LIBRARY_PATH=/opt/openssl
-      - PATH=/opt/openssl/apps:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - OPENSSL_BIN=/opt/openssl/bin/openssl
+      - OPENSSL_LIB_DIR=/opt/openssl/lib64
+      - OPENSSL_MODULES=/opt/openssl/lib64/ossl-modules
+      - OPENSSL_CONF=/opt/openssl/openssl.cnf
+      - LD_LIBRARY_PATH=/opt/openssl/lib64
+      - PATH=/opt/openssl/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/docdb
       - DOC_STATE_DIR=/state
       - STATE_ROOT=/state
@@ -94,19 +94,19 @@ services:
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
     command: ["python3", "start_portals.py"]
     environment:
-      - OPENSSL_BIN=/opt/openssl/apps/openssl
-      - OPENSSL_LIB_DIR=/opt/openssl
-      - OPENSSL_MODULES=/opt/openssl/providers
-      - OPENSSL_CONF=/opt/openssl/apps/openssl.cnf
-      - LD_LIBRARY_PATH=/opt/openssl
+      - OPENSSL_BIN=/opt/openssl/bin/openssl
+      - OPENSSL_LIB_DIR=/opt/openssl/lib64
+      - OPENSSL_MODULES=/opt/openssl/lib64/ossl-modules
+      - OPENSSL_CONF=/opt/openssl/openssl.cnf
+      - LD_LIBRARY_PATH=/opt/openssl/lib64
     depends_on:
       - gateway
     ports:
-      - "3000:3000"
-      - "3001:3001"
-      - "3002:3002"
-      - "3003:3003"
-      - "3004:3004"
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:3002:3002"
+      - "127.0.0.1:3003:3003"
+      - "127.0.0.1:3004:3004"
     networks:
       - public
 
@@ -122,8 +122,8 @@ services:
       - doc_service
       - qr_service
     ports:
-      - "8080:80"
-      - "8443:443"
+      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8443:443"
     networks:
       - internal
       - public

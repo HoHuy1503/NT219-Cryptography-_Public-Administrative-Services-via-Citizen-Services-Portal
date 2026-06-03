@@ -50,8 +50,8 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             payload = json.loads(raw_body or '{}')
             algorithm = (payload.get('algorithm') or 'ML-DSA-44').strip()
 
-            if algorithm != 'ML-DSA-44':
-                self._send_json(400, {'error': 'Only ML-DSA-44 is supported'})
+            if algorithm not in ('ML-DSA-44', 'EC-P384', 'ECDSA-P384'):
+                self._send_json(400, {'error': 'Only ML-DSA-44 and EC-P384 are supported'})
                 return
 
             openssl_bin = os.environ.get('OPENSSL_BIN', '/opt/openssl/apps/openssl')
@@ -69,17 +69,20 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             env['LD_LIBRARY_PATH'] = openssl_lib_dir
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                priv_path = Path(tmpdir) / 'officer_private.pem'
-                pub_path = Path(tmpdir) / 'officer_public.pem'
+                priv_path = Path(tmpdir) / 'private.pem'
+                pub_path = Path(tmpdir) / 'public.pem'
 
-                subprocess.run([openssl_bin, 'genpkey', '-algorithm', 'ML-DSA-44', '-out', str(priv_path)], check=True, capture_output=True, env=env)
+                if algorithm == 'ML-DSA-44':
+                    subprocess.run([openssl_bin, 'genpkey', '-algorithm', 'ML-DSA-44', '-out', str(priv_path)], check=True, capture_output=True, env=env)
+                else:
+                    subprocess.run([openssl_bin, 'genpkey', '-algorithm', 'EC', '-pkeyopt', 'ec_paramgen_curve:secp384r1', '-out', str(priv_path)], check=True, capture_output=True, env=env)
                 subprocess.run([openssl_bin, 'pkey', '-in', str(priv_path), '-pubout', '-out', str(pub_path)], check=True, capture_output=True, env=env)
 
                 private_key_pem = priv_path.read_text(encoding='utf-8')
                 public_key_pem = pub_path.read_text(encoding='utf-8')
 
             self._send_json(200, {
-                'algorithm': 'ML-DSA-44',
+                'algorithm': 'ML-DSA-44' if algorithm == 'ML-DSA-44' else 'EC-P384',
                 'public_key_pem': public_key_pem,
                 'private_key_pem': private_key_pem,
             })

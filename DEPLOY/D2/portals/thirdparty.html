@@ -29,6 +29,7 @@
 
     <nav class="app-nav">
       <a href="#dashboard" onclick="showSection('dashboard'); loadVerificationRequests();">Yêu cầu xác thực</a>
+      <a href="#certificates" onclick="showSection('certificates'); loadThirdpartyCertificates();">Chứng chỉ</a>
       <span class="nav-spacer"></span>
       <a id="nav-auth" href="#auth" onclick="showSection('auth')">Tài khoản</a>
       <a id="nav-logout" href="#" onclick="thirdpartyLogout()" style="display:none">Đăng xuất</a>
@@ -40,6 +41,14 @@
         <p class="subtitle">Các yêu cầu từ công dân đang chờ bạn quét QR để xác thực tại quầy.</p>
         <button class="btn" onclick="loadVerificationRequests()">Tải lại danh sách</button>
         <div id="verify-requests-list"></div>
+      </div>
+    </div>
+
+    <div id="certificates" class="section">
+      <div class="card">
+        <h2>Chứng chỉ PKI của tổ chức</h2>
+        <button class="btn" onclick="loadThirdpartyCertificates()">Tải chứng chỉ</button>
+        <div id="thirdparty-certs-list"></div>
       </div>
     </div>
 
@@ -115,6 +124,7 @@
     const TP_USER_ID_KEY = 'thirdparty_user_id';
     const TP_USER_TYPE_KEY = 'thirdparty_user_type';
     const TP_DISPLAY_NAME_KEY = 'thirdparty_display_name';
+    const TP_PRIVATE_KEY_STORE_PREFIX = 'thirdparty_private_key_pem:';
 
     function getThirdpartySessionId() {
       return localStorage.getItem(TP_SESSION_KEY) || localStorage.getItem('sessionId');
@@ -122,7 +132,7 @@
 
     function showSection(section) {
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-      const map = { dashboard: 'dashboard', auth: 'auth' };
+      const map = { dashboard: 'dashboard', auth: 'auth', certificates: 'certificates' };
       const id = map[section];
       if (id) document.getElementById(id).classList.add('active');
     }
@@ -180,10 +190,19 @@
       }
 
       try {
+        const keypairResponse = await fetch('/__keypair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ algorithm: 'EC-P384' })
+        });
+        const keypairData = await keypairResponse.json().catch(() => ({}));
+        if (!keypairResponse.ok) throw new Error(keypairData.error || 'Không thể sinh keypair');
+        localStorage.setItem(`${TP_PRIVATE_KEY_STORE_PREFIX}${thirdpartyId}`, keypairData.private_key_pem);
+
         const response = await fetch(`${API_URL}/api/storage/register/thirdparty`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ thirdparty_id: thirdpartyId, org_name: orgName, email, contact_person: contactPerson, password })
+          body: JSON.stringify({ thirdparty_id: thirdpartyId, org_name: orgName, email, contact_person: contactPerson, password, mtls_public_key_pem: keypairData.public_key_pem })
         });
         const data = await response.json();
         if (response.ok) {
@@ -196,6 +215,61 @@
         }
       } catch (e) {
         document.getElementById('register-result').innerHTML = `<div class="alert error">Lỗi: ${e.message}</div>`;
+      }
+    }
+
+    function downloadPem(filename, content) {
+      const blob = new Blob([content], { type: 'application/x-pem-file' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function loadThirdpartyCertificates() {
+      const listEl = document.getElementById('thirdparty-certs-list');
+      const sessionId = getThirdpartySessionId();
+      const thirdpartyId = localStorage.getItem(TP_USER_ID_KEY);
+      if (!sessionId || !thirdpartyId) {
+        listEl.innerHTML = '<div class="alert info">Vui lòng đăng nhập để xem chứng chỉ.</div>';
+        return;
+      }
+      try {
+        const response = await fetch(`${API_URL}/api/storage/identity-certificates?subject_type=thirdparty&subject_id=${encodeURIComponent(thirdpartyId)}`, {
+          headers: { Authorization: `Bearer ${sessionId}` }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải chứng chỉ');
+        const certs = data.certificates || [];
+        let html = '<table><tr><th>Mã chứng chỉ</th><th>Trạng thái</th><th>Hết hạn</th><th>Tải</th></tr>';
+        certs.forEach(cert => {
+          const statusDisplay = cert.is_active ? '<span style="color:green;font-weight:600">Còn hiệu lực</span>' : '<span style="color:#dc2626;font-weight:600">Hết hạn</span>';
+          const downloadCell = cert.is_active && !cert.downloaded ? `<button class="btn secondary" onclick="downloadThirdpartyCertificate('${cert.cert_id}')">Tải 1 lần</button>` : (cert.downloaded ? 'Đã tải' : '—');
+          html += `<tr><td>${cert.cert_id}</td><td>${statusDisplay}</td><td>${cert.expires_at || '—'}</td><td>${downloadCell}</td></tr>`;
+        });
+        html += '</table>';
+        if (!certs.length) html = '<div class="alert info">Chưa có chứng chỉ nào hoặc đang chờ PKI duyệt.</div>';
+        listEl.innerHTML = html;
+      } catch (e) {
+        listEl.innerHTML = `<div class="alert error">${e.message}</div>`;
+      }
+    }
+
+    async function downloadThirdpartyCertificate(certId) {
+      const sessionId = getThirdpartySessionId();
+      try {
+        const response = await fetch(`${API_URL}/api/storage/identity-certificates/${certId}/download`, {
+          headers: { Authorization: `Bearer ${sessionId}` }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải chứng chỉ');
+        downloadPem(`${certId}.pem`, data.certificate_pem || '');
+        alert(data.message || 'Đã tải chứng chỉ. Server không giữ private key nên không thể tạo .p12 thật.');
+        loadThirdpartyCertificates();
+      } catch (e) {
+        document.getElementById('thirdparty-certs-list').innerHTML = `<div class="alert error">${e.message}</div>`;
       }
     }
 
@@ -322,7 +396,7 @@
           ? `<p><strong>Hash mong đợi:</strong> ${details.expected_content_hash}</p><p><strong>Hash đang gửi:</strong> ${details.provided_content_hash}</p>`
           : '';
         const fallbackDetails = details.fallback_verified
-          ? `<p><strong>Ghi chú:</strong> Đã xác thực thành công bằng key_version ${details.signature_key_version} từ PKI.</p>`
+          ? `<p><strong>Ghi chú:</strong> Đã xác thực thành công bằng chứng chỉ được quản lý bởi PKI.</p>`
           : '';
         
         let finalStatus;
@@ -372,7 +446,6 @@
               <h4>Xác thực thành công</h4>
               <table>
                 <tr><td><strong>Officer ID:</strong></td><td>${data.officer_id}</td></tr>
-                <tr><td><strong>Thuật toán ký:</strong></td><td>${details.signature_algorithm || 'N/A'}</td></tr>
                 <tr><td><strong>ID Công dân:</strong></td><td>${details.citizen_id || 'N/A'}</td></tr>
                 <tr><td><strong>ID Tài liệu:</strong></td><td>${details.document_id || 'N/A'}</td></tr>
                 <tr><td><strong>Ngày ký:</strong></td><td>${details.signed_at || 'N/A'}</td></tr>

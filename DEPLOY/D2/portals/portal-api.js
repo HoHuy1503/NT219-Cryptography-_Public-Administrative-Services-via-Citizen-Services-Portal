@@ -1,5 +1,10 @@
 /** Shared API client for all GovPortal HTML portals (ports 3000–3004 → gateway 8080). */
-const API_URL = `${window.location.protocol}//${window.location.hostname}:8080`;
+const LOCAL_PORTAL_PORTS = new Set(['3000', '3001', '3002', '3003', '3004']);
+const API_URL = window.GOVPORTAL_API_URL || (
+  LOCAL_PORTAL_PORTS.has(window.location.port)
+    ? `${window.location.protocol}//${window.location.hostname}:8080`
+    : `${window.location.protocol}//${window.location.host}`
+);
 
 function getSessionToken() {
   return localStorage.getItem('sessionId');
