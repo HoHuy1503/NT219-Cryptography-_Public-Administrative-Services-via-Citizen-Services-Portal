@@ -214,6 +214,11 @@ Chuc nang:
 - Serve 5 portal static files tu `/opt/govportal/DEPLOY/D2/portals`.
 - Bat browser client cert cho `dbadmin`, `thirdparties`, `pki`, `officers`.
 - Khong bat browser client cert cho `citizens`.
+- Gioi han dung client cert theo tung portal bang subject DN:
+  - `dbadmin` chi nhan cert storage admin.
+  - `thirdparties` chi nhan cert third party.
+  - `pki` chi nhan cert PKI admin.
+  - `officers` chi nhan cert officer.
 - Proxy `/api/` ve `http://127.0.0.1:8080`.
 - Proxy helper route cho officer/thirdparty khi can tao key hoac ky.
 
@@ -459,4 +464,3 @@ Ly do QR chi chua id + random token:
 - Private key khong dua vao frontend.
 - CA private key va domain private key khong nen commit len git.
 - USB token/HSM nen giu private key trong trien khai that.
-
