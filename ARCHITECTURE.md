@@ -1,201 +1,304 @@
-# Kien Truc GovPortal PKI
+# GovPortal PKI Architecture
 
-## 1. Muc Tieu
+Tai lieu nay tom tat nhung thanh phan dang dung trong repo, chuc nang cua tung phan, topology he thong, va cac loai key/cert quan trong.
 
-GovPortal la he thong demo cong dich vu voi 5 portal public:
+## 1. Muc tieu he thong
 
-| Portal | Domain | Dang nhap |
+GovPortal la he thong demo cong dich vu va PKI voi 5 portal public:
+
+| Portal | Domain | Vai tro |
 | --- | --- | --- |
-| Citizen | `citizens.hnh2511.xyz` | Tai khoan va OTP/SMS theo luong ung dung |
-| Storage Admin | `dbadmin.hnh2511.xyz` | Client certificate tren trinh duyet |
-| Third Party | `thirdparties.hnh2511.xyz` | Client certificate tren trinh duyet |
-| PKI Admin | `pki.hnh2511.xyz` | Client certificate tren trinh duyet |
-| Officer | `officers.hnh2511.xyz` | Client certificate tren trinh duyet |
+| Citizen | `citizens.hnh2511.xyz` | Cong dan dang nhap bang account/OTP, tao yeu cau ky/xac thuc tai lieu |
+| Storage Admin | `dbadmin.hnh2511.xyz` | Quan tri database, tai lieu, nguoi dung, audit |
+| Third Party | `thirdparties.hnh2511.xyz` | Ben thu ba xac thuc QR/tai lieu |
+| PKI Admin | `pki.hnh2511.xyz` | Duyet yeu cau cap cert va quan ly CA/PKI |
+| Officer | `officers.hnh2511.xyz` | Can bo xu ly yeu cau va ky nghiep vu |
 
-Citizen la portal public cho nguoi dan. Bon portal con lai la portal co kiem tra client certificate o lop TLS. API noi bo giua gateway va services cung di qua mTLS.
+Citizen la portal public khong bat browser client cert. Bon portal con lai bat browser client cert o lop TLS.
 
-## 2. Tong Quan Luong Mang
-
-```text
-Internet
-  |
-  | HTTPS public, Let's Encrypt cert
-  v
-Host Nginx tren Azure VM
-  |
-  | static portal files + /api reverse proxy
-  v
-Docker gateway Nginx, localhost:8080
-  |
-  | auth_request sang authz_proxy/OPA
-  | mTLS toi services noi bo
-  v
-storage_service, doc_service, qr_service, postgres
-```
-
-Public IP hien tai: `20.205.109.23`.
-
-Public TLS certificate dang dung:
+## 2. Topology tong the
 
 ```text
-/etc/letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem
-/etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem
+                                      Internet
+                                         |
+                                         | HTTPS public
+                                         | Server cert: Let's Encrypt
+                                         v
+                         +-------------------------------+
+                         | Azure VM public IP             |
+                         | 20.205.109.23                  |
+                         +-------------------------------+
+                                         |
+                                         v
+              +--------------------------------------------------+
+              | Host Nginx                                       |
+              | /etc/nginx/sites-available/govportal             |
+              |                                                  |
+              | - Terminate public HTTPS                         |
+              | - Serve portal HTML/CSS/JS                       |
+              | - Check browser client cert for 4 private portals |
+              | - Proxy /api/ to Docker gateway                  |
+              +--------------------------------------------------+
+                    |             |              |
+                    |             |              |
+       static HTML  |             | /api/        | helper routes
+       portals      |             v              v
+                    |     +----------------+  +--------------------------+
+                    |     | Docker gateway |  | portals container         |
+                    |     | 127.0.0.1:8080 |  | 127.0.0.1:3000-3004      |
+                    |     | Nginx API GW   |  | __keypair / __sign helper |
+                    |     +----------------+  +--------------------------+
+                    |             |
+                    |             | auth_request
+                    |             v
+                    |     +----------------+
+                    |     | authz_proxy    |
+                    |     | JWT -> OPA     |
+                    |     +----------------+
+                    |             |
+                    |             v
+                    |     +----------------+
+                    |     | OPA policy     |
+                    |     | authz.rego     |
+                    |     +----------------+
+                    |
+                    | Internal mTLS from gateway to services
+                    v
+          +------------------+       +------------------+       +----------------+
+          | storage_service  |       | doc_service      |       | qr_service     |
+          | users/documents  |       | PKI/CA, certs    |       | QR verify      |
+          | requests/audit   |       | document verify  |       | token format   |
+          +------------------+       +------------------+       +----------------+
+                    |
+                    v
+              +------------+
+              | postgres   |
+              | docdb      |
+              +------------+
 ```
 
-Certificate nay co SAN cho 5 subdomain.
+## 3. Public network flow
 
-## 3. Docker Compose
+```text
+Browser
+  -> https://<portal-domain>
+  -> Host Nginx on Azure VM
+  -> static portal file or /api reverse proxy
+  -> Docker gateway Nginx on 127.0.0.1:8080
+  -> OPA authorization check if route is protected
+  -> internal service over mTLS
+  -> postgres if data is needed
+```
 
-File chinh: `DEPLOY/D2/docker-compose.yml`.
+Important public paths:
+
+| Path | Xu ly boi |
+| --- | --- |
+| `/` | Host Nginx serve portal HTML |
+| `/api/*` | Host Nginx proxy to Docker gateway |
+| `/__keypair` | Host Nginx proxy to portals helper for officer/thirdparty |
+| `/__sign` | Host Nginx proxy to portals helper for officer |
+
+## 4. Repo inventory
+
+### 4.1 Root files
+
+| Path | Chuc nang |
+| --- | --- |
+| `ARCHITECTURE.md` | Tai lieu kien truc hien tai |
+| `domain_key/` | Backup local cua cert/key public HTTPS, browser client cert, va Nginx config |
+| `DEPLOY/D2/` | Stack deploy chinh cua he thong |
+
+### 4.2 DEPLOY/D2
+
+| Path | Chuc nang |
+| --- | --- |
+| `DEPLOY/D2/docker-compose.yml` | Khai bao toan bo Docker services, networks, volumes, ports |
+| `DEPLOY/D2/state_paths.py` | Helper duong dan state runtime |
+| `DEPLOY/D2/docker/` | Source cua cac service backend va gateway |
+| `DEPLOY/D2/portals/` | 5 giao dien HTML va portal helper |
+| `DEPLOY/D2/scripts/` | Script tao cert, xin HTTPS cert, sync cert tu server ve may chinh |
+| `DEPLOY/D2/nginx-public/` | Template Nginx public cho host VM |
+
+### 4.3 Docker services
+
+| Service/path | Chuc nang |
+| --- | --- |
+| `docker/storage_service/app.py` | API chinh: login, users, documents, requests, QR metadata, cert request metadata, audit |
+| `docker/storage_service/jwt_auth.py` | Tao/verify JWT va JWKS |
+| `docker/storage_service/nginx-internal.conf` | Nginx noi bo cua storage service, bat mTLS |
+| `docker/doc_service/app.py` | PKI/CA, cap cert, verify chu ky/tai lieu |
+| `docker/doc_service/nginx-internal.conf` | Nginx noi bo cua doc service, bat mTLS |
+| `docker/qr_service/app.py` | Xu ly QR verify noi bo |
+| `docker/qr_service/nginx-internal.conf` | Nginx noi bo cua QR service, bat mTLS |
+| `docker/authz_proxy/app.py` | Doc JWT, tao input cho OPA, tra allow/deny cho gateway |
+| `docker/opa/policies/authz.rego` | Policy phan quyen tap trung |
+| `docker/gateway/nginx.conf` | API gateway Nginx trong Docker |
+| `docker/gateway/conf.d/*.conf` | Route API, CORS cleanup, va cau hinh mTLS khi gateway goi services |
+
+### 4.4 Portal files
+
+| File | Chuc nang |
+| --- | --- |
+| `portals/citizen.html` | Giao dien cong dan |
+| `portals/storage.html` | Giao dien storage admin |
+| `portals/thirdparty.html` | Giao dien ben thu ba |
+| `portals/pki.html` | Giao dien PKI admin |
+| `portals/officer.html` | Giao dien officer |
+| `portals/portal-api.js` | Helper frontend de goi API theo same-origin/public-local mode |
+| `portals/shared-portal.css` | CSS dung chung |
+| `portals/start_portals.py` | Static file server va helper local `__keypair`, `__sign` |
+
+### 4.5 Scripts
+
+| Script | Chuc nang |
+| --- | --- |
+| `scripts/generate_mtls_certs.sh` | Tao cert mTLS noi bo cho gateway/services |
+| `scripts/generate_mldsa_mtls_certs.ps1/sh` | Script thu nghiem tao cert noi bo bang OpenSSL moi |
+| `scripts/generate_portal_client_certs.ps1/sh` | Tao browser client cert demo cho pki/officer/thirdparty/storage_admin |
+| `scripts/request_letsencrypt_5domains.ps1` | Xin cert Let's Encrypt cho 5 domain bang Certbot/Docker |
+| `scripts/request_letsencrypt_wildcard.ps1` | Xin wildcard cert Let's Encrypt bang DNS challenge |
+| `scripts/sync_server_certs.ps1` | Dong bo cert/key quan trong tu Azure VM ve `domain_key/` local |
+
+## 5. Docker Compose
+
+File chinh:
+
+```text
+DEPLOY/D2/docker-compose.yml
+```
 
 Services:
 
 | Service | Vai tro |
 | --- | --- |
 | `postgres` | Database chinh, database name `docdb` |
-| `opa` | Policy engine, doc policy nam trong `docker/opa/policies` |
-| `authz_proxy` | Doc JWT, tao input cho OPA, tra allow/deny cho gateway |
-| `storage_service` | Tai khoan, documents, requests, cert metadata, audit log |
-| `doc_service` | PKI/CA, cap cert, verify chu ky tai lieu |
-| `qr_service` | Service QR noi bo |
-| `portals` | Server file tinh cho 5 portal va helper local `__keypair`, `__sign` |
-| `gateway` | Nginx API gateway noi bo |
+| `opa` | Policy engine |
+| `authz_proxy` | Bridge giua gateway va OPA |
+| `storage_service` | API nghiep vu va database access |
+| `doc_service` | PKI/CA va verify tai lieu |
+| `qr_service` | QR service noi bo |
+| `gateway` | Nginx API gateway |
+| `portals` | Static portal server va helper local |
 
-Network:
+Networks:
 
 | Network | Muc dich |
 | --- | --- |
 | `internal` | DB, OPA, authz, services, gateway noi bo |
-| `public` | Gateway va portal helper localhost |
+| `public` | Gateway va portals container |
 
-Ports chi bind localhost:
-
-```text
-127.0.0.1:3000-3004 -> portal helper
-127.0.0.1:8080      -> gateway HTTP
-127.0.0.1:8443      -> gateway HTTPS noi bo
-```
-
-Vi chi bind `127.0.0.1`, nguoi ngoai khong vao truc tiep Docker duoc. Public traffic phai di qua host Nginx tren port 80/443.
-
-Volumes quan trong:
+Public exposure:
 
 ```text
-DEPLOY/D2/state              -> state runtime
-DEPLOY/D2/state/mtls         -> cert mTLS noi bo cho service
-/home/hnh/Documents/openssl/openssl-3.6.1 -> OpenSSL 3.6.1 build san
+127.0.0.1:3000-3004 -> portals/helper
+127.0.0.1:8080      -> Docker gateway HTTP
+127.0.0.1:8443      -> Docker gateway HTTPS internal
 ```
 
-## 4. Host Nginx Public
+Vi chi bind localhost, nguoi ngoai chi vao duoc qua Host Nginx.
 
-File tren server:
+## 6. Nginx public on Azure VM
+
+Server path:
 
 ```text
 /etc/nginx/sites-available/govportal
 /etc/nginx/sites-enabled/govportal
 ```
 
-Vai tro:
+Chuc nang:
 
-- Terminate HTTPS public bang cert Let's Encrypt.
-- Redirect HTTP port 80 sang HTTPS.
-- Serve file portal HTML/CSS/JS tu `/opt/govportal/DEPLOY/D2/portals`.
-- Proxy `/api/` ve Docker gateway `http://127.0.0.1:8080`.
-- Bat client certificate cho:
-  - `dbadmin.hnh2511.xyz`
-  - `thirdparties.hnh2511.xyz`
-  - `pki.hnh2511.xyz`
-  - `officers.hnh2511.xyz`
-- Khong bat client certificate cho `citizens.hnh2511.xyz`.
+- Dung Let's Encrypt cert de terminate HTTPS public.
+- Redirect HTTP sang HTTPS.
+- Serve 5 portal static files tu `/opt/govportal/DEPLOY/D2/portals`.
+- Bat browser client cert cho `dbadmin`, `thirdparties`, `pki`, `officers`.
+- Khong bat browser client cert cho `citizens`.
+- Proxy `/api/` ve `http://127.0.0.1:8080`.
+- Proxy helper route cho officer/thirdparty khi can tao key hoac ky.
 
-Trust bundle cho client certificate:
+Trust bundle cho browser client cert:
 
 ```text
 /etc/nginx/govportal/client-ca-bundle.crt
 ```
 
-Bundle nay gom CA client cu va CA PKI moi neu da co.
+## 7. Docker gateway Nginx
 
-Host Nginx cung proxy helper:
-
-| Route | Dung cho |
-| --- | --- |
-| `/__keypair` tren officer/thirdparty | Tao keypair phia portal helper |
-| `/__sign` tren officer | Ky tai lieu bang private key local cua officer |
-
-## 5. Nginx Gateway Trong Docker
-
-File chinh:
+File:
 
 ```text
 DEPLOY/D2/docker/gateway/nginx.conf
 ```
 
-Vai tro:
+Chuc nang:
 
-- Nhan API tu host Nginx.
-- Xu ly CORS cho dev portal ports `3000-3004`.
-- Goi `authz_proxy` qua `auth_request /_opa_auth`.
-- Route request toi storage/doc/qr services.
-- Ket noi toi services bang mTLS noi bo.
+- Nhan API tu Host Nginx.
+- Dat CORS header.
+- Tra `204` cho `OPTIONS`.
+- Goi `authz_proxy` bang `auth_request`.
+- Route request toi storage/doc/qr.
+- Dung client cert cua gateway de goi services qua mTLS.
 
 Include files:
 
-| File | Vai tro |
+| File | Chuc nang |
 | --- | --- |
-| `proxy_storage_public.conf` | Public API khong can JWT nhu login/register/JWKS |
-| `proxy_storage_protected.conf` | Protected storage APIs, can OPA allow |
-| `proxy_other.conf` | Route `/api/pki`, `/api/qr`, `/doc`, `/health` |
-| `proxy_mtls_storage.conf` | Cert client gateway khi goi storage service |
-| `proxy_mtls_doc.conf` | Cert client gateway khi goi doc service |
-| `proxy_mtls_qr.conf` | Cert client gateway khi goi qr service |
-| `proxy_hide_cors.conf` | An CORS headers tu upstream de gateway la nguon CORS duy nhat |
+| `proxy_storage_public.conf` | API public: login, register, health/JWKS neu co |
+| `proxy_storage_protected.conf` | API storage can JWT/OPA |
+| `proxy_other.conf` | Route PKI, QR, doc, health |
+| `proxy_mtls_storage.conf` | Cert gateway khi goi storage |
+| `proxy_mtls_doc.conf` | Cert gateway khi goi doc |
+| `proxy_mtls_qr.conf` | Cert gateway khi goi QR |
+| `proxy_hide_cors.conf` | Xoa CORS header tu upstream de gateway la noi duy nhat set CORS |
 
-## 6. CORS
+## 8. OPA and authorization
 
-CORS duoc dat o Docker gateway Nginx:
-
-```nginx
-map $http_origin $cors_origin {
-  default "";
-  "~^https?://[^/]+:300[0-4]$" $http_origin;
-}
-```
-
-Muc dich:
-
-- Cho phep dev portal local ports `3000-3004`.
-- Tra headers `Access-Control-Allow-*`.
-- Tra `204` cho preflight `OPTIONS`.
-- An CORS headers tu Flask upstream bang `proxy_hide_header`, tranh loi multiple CORS headers.
-
-Khi chay public domain cung host voi API, frontend goi same-origin `/api`, nen CORS gan nhu khong can tren public path.
-
-## 7. OPA Policy
-
-File:
+Policy file:
 
 ```text
 DEPLOY/D2/docker/opa/policies/authz.rego
 ```
 
+Auth flow:
+
+```text
+Gateway
+  -> auth_request /_opa_auth
+  -> authz_proxy
+  -> decode JWT
+  -> build input {method, path, user_type, user_id}
+  -> OPA /v1/data/govportal/authz/allow
+  -> allow or deny
+```
+
 Nguyen tac:
 
-- Mac dinh `allow = false`.
-- Public paths gom health, JWKS, login, register.
-- `storage_admin` duoc quan ly hau het storage, tru mot so vung bi chan.
-- `pki_admin` duoc duyet request/cap cert, nhung khong vao DB admin destructive endpoint.
-- `officer` duoc xem officers, document sign requests, documents, cert requests, identity certs.
-- `citizen` duoc xem documents cua minh, tao verify/sign requests, verify QR.
-- `thirdparty` duoc xem verify requests, verify QR, lay identity cert cua minh.
+- Mac dinh deny.
+- Public route duoc khai bao ro.
+- Route protected phai co JWT hop le.
+- Quyen tach theo role: citizen, officer, thirdparty, pki_admin, storage_admin.
 
-Gateway tao request noi bo toi `authz_proxy`; `authz_proxy` doc JWT, tao input gom path/method/user_type, roi hoi OPA.
+## 9. CORS
 
-## 8. Cac Loai Key Va Cert
+CORS duoc dat tai Docker gateway, khong dat rai rac o tung Flask service.
 
-### 8.1 Public HTTPS certificate
+Muc dich:
 
-Dung de trinh duyet thay 5 domain la HTTPS hop le.
+- Cho portal dev ports `3000-3004` goi API.
+- Cho phep credential/header can thiet.
+- Xu ly preflight `OPTIONS`.
+- Tranh loi duplicate CORS header bang `proxy_hide_cors.conf`.
+
+Khi chay tren public domain, frontend goi same-origin `/api`, nen CORS it quan trong hon nhung van giu de dev/test.
+
+## 10. Key and certificate inventory
+
+### 10.1 Public HTTPS cert
+
+Owner: Azure VM / public Host Nginx.
+
+Dung de browser tin 5 domain public.
 
 Server path:
 
@@ -204,19 +307,21 @@ Server path:
 /etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem
 ```
 
-Local sync path:
+Local backup:
 
 ```text
 domain_key/letsencrypt/live/citizens.hnh2511.xyz/
 ```
 
-Cap boi Let's Encrypt, tu dong renew bang Certbot.
+`fullchain.pem` la cert public + chain. `privkey.pem` la private key cua domain, phai giu kin.
 
-### 8.2 Browser client certificate cho mTLS
+### 10.2 Browser client cert
 
-Dung de dang nhap cac portal noi bo qua browser client certificate.
+Owner: pki_admin, officer, thirdparty, storage_admin.
 
-Local/server path hien co:
+Dung de login vao cac portal bat mTLS.
+
+Local path:
 
 ```text
 domain_key/browser_clients/ca/portal-client-ca.crt
@@ -227,35 +332,15 @@ domain_key/browser_clients/pfx/thirdparty.p12
 domain_key/browser_clients/pfx/storage_admin.p12
 ```
 
-`*.p12` co the import vao Windows/browser hoac USB token. Mat khau demo hien tai: `changeit`.
+`*.p12` chua private key + client cert, dung de import vao Windows/browser/USB token. `portal-client-ca.key` la CA private key de ky client cert demo, can bao ve.
 
-### 8.3 PKI identity certificate moi
+### 10.3 Internal service mTLS cert
 
-Luong moi:
+Owner: gateway va internal services.
 
-- Officer va thirdparty tao key truy cap rieng.
-- Gui public key len PKI.
-- PKI admin duyet.
-- CA cap client certificate.
-- User tai cert mot lan.
+Dung de gateway goi storage/doc/qr qua mTLS.
 
-Private key nen nam phia client hoac USB token. Server chi nhan public key, nen server khong the tao file `.p12` day du neu khong co private key.
-
-### 8.4 Officer business signing key
-
-Chi officer moi co key ky nghiep vu de ky tai lieu.
-
-Luu trong DB:
-
-```text
-officer_keys.public_key_pem
-```
-
-Private key khong luu DB; portal/helper giu local de ky.
-
-### 8.5 Internal service mTLS certs
-
-Dung cho gateway goi services noi bo:
+Runtime path:
 
 ```text
 DEPLOY/D2/state/mtls/ca/ca.crt
@@ -269,13 +354,17 @@ DEPLOY/D2/state/mtls/services/qr.crt
 DEPLOY/D2/state/mtls/services/qr.key
 ```
 
-Sinh bang script:
+Docker mount:
 
 ```text
-DEPLOY/D2/scripts/generate_mtls_certs.sh
+./state/mtls:/etc/nginx/mtls:ro
 ```
 
-### 8.6 CA / PKI state
+### 10.4 PKI CA cert/key
+
+Owner: PKI/CA service.
+
+Dung de cap cert cho officer/thirdparty theo luong request/approve/download.
 
 Runtime path:
 
@@ -285,97 +374,89 @@ DEPLOY/D2/state/pki/ca_cert.pem
 DEPLOY/D2/state/pki/issued_certs.json
 ```
 
-`ca_key.pem` la private key CA, phai bao ve. `ca_cert.pem` la public CA certificate, co the dua vao trust bundle.
+`ca_key.pem` la private key CA, can bao ve cao nhat. `ca_cert.pem` la public CA cert.
 
-## 9. Database Chinh
+### 10.5 Officer business signing key
 
-Bang identity:
+Owner: officer.
+
+Dung de ky nghiep vu/tai lieu. Day la key khac voi key mTLS dang nhap.
+
+DB chi luu public key va metadata:
+
+```text
+officer_keys.public_key_pem
+officer_keys.key_version
+```
+
+Private key khong nen luu DB. Trong demo helper co the giu local; trien khai that nen nam trong USB token/HSM.
+
+## 11. Certbot role
+
+Certbot chi dung cho public HTTPS cert cua domain.
+
+No khong phai CA noi bo. No khong cap cert officer, thirdparty, USB token, hay service mesh.
+
+Certbot lam:
+
+```text
+1. Chung minh domain thuoc quyen kiem soat cua server
+2. Xin cert tu Let's Encrypt
+3. Luu cert/key vao /etc/letsencrypt
+4. Gia han cert khi gan het han
+```
+
+## 12. Database summary
 
 | Bang | Muc dich |
 | --- | --- |
 | `citizens` | Tai khoan cong dan |
 | `officers` | Tai khoan can bo |
-| `thirdparty_users` | Tai khoan to chuc ben thu ba |
-| `storage_admins` | Tai khoan quan tri storage |
-| `pki_admins` | Tai khoan quan tri PKI |
-
-Bang certificate/key:
-
-| Bang | Muc dich |
-| --- | --- |
-| `identity_cert_requests` | Request cap cert truy cap cho officer/thirdparty |
-| `identity_certificates` | Cert da cap, co co `p12_downloaded_at` de chi tai mot lan |
+| `thirdparty_users` | Tai khoan ben thu ba |
+| `storage_admins` | Tai khoan storage admin |
+| `pki_admins` | Tai khoan PKI admin |
+| `documents` | Metadata tai lieu va hash noi dung |
+| `signatures` | Chu ky tai lieu va signer |
+| `document_qr` | QR id, token hash, document/signature hash |
+| `document_sign_requests` | Yeu cau cong dan gui officer ky |
+| `document_verify_requests` | Yeu cau cong dan gui thirdparty xac thuc |
+| `identity_cert_requests` | Yeu cau cap cert truy cap |
+| `identity_certificates` | Cert da cap, chi cho tai mot lan |
 | `officer_keys` | Public key ky nghiep vu cua officer |
-| `officer_certificates` | Bang legacy/compat cho cert active cua officer |
+| `audit_log` | Lich su hanh dong |
 
-Bang tai lieu:
-
-| Bang | Muc dich |
-| --- | --- |
-| `documents` | Metadata tai lieu, `content_hash`, status |
-| `signatures` | Chu ky, signer, key version |
-| `document_qr` | QR token hash, document id, content hash, signature hash |
-| `document_sign_requests` | Citizen yeu cau officer ky |
-| `document_verify_requests` | Citizen yeu cau thirdparty xac thuc |
-| `audit_log` | Audit trail |
-
-## 10. QR Verification
-
-QR payload:
+## 13. QR topology
 
 ```text
-GVP1.<qr_id>.<random_token>
+Citizen/Officer action
+  -> document stored/hashed
+  -> QR record created
+  -> QR payload = GVP1.<qr_id>.<random_token>
+  -> database stores token_hash, content_hash, sig_hash
+
+Thirdparty scan
+  -> send QR payload to API
+  -> backend hashes token
+  -> lookup qr_id + token_hash
+  -> verify document hash and signature metadata
+  -> return verification result
 ```
 
-Y nghia:
+Ly do QR chi chua id + random token:
 
-- `GVP1`: version cua QR format.
-- `qr_id`: id ban ghi QR.
-- `random_token`: token ngau nhien chi nam tren QR.
-
-Trong DB khong luu token goc, chi luu:
-
-```text
-token_hash = SHA256(random_token)
-content_hash = SHA256(document_bytes)
-sig_hash = SHA256(signature_envelope)
-```
-
-Khi thirdparty quet:
-
-1. Backend tach `qr_id` va token.
-2. Hash token roi doi chieu voi `document_qr.token_hash`.
-3. Neu co file tai lieu, backend tinh hash file va so voi `content_hash`.
-4. Backend lay signature/public key dung version de verify.
-5. Ket qua duoc ghi vao `document_verify_requests`.
-
-Ly do khong nhet signature/document hash vao QR:
-
-- QR ngan hon, de quet hon.
-- Khong lo thong tin tai lieu hoac chu ky ra ngoai.
+- QR ngan va de quet.
+- Khong dua document/signature day du ra ngoai.
 - Co the revoke/rotate QR tren server.
-- DB co the xac thuc ma khong can QR chua du lieu lon.
+- DB chi luu token hash, khong luu token goc.
 
-## 11. Script Quan Tri
+## 14. Security principles
 
-| Script | Muc dich |
-| --- | --- |
-| `generate_mtls_certs.sh` | Tao cert mTLS noi bo service |
-| `generate_portal_client_certs.ps1/sh` | Tao cert browser client demo |
-| `request_letsencrypt_5domains.ps1` | Xin cert public 5 domain bang Certbot/Docker |
-| `sync_server_certs.ps1` | Dong bo cert/key can backup tu Azure ve `domain_key` local |
+- Public edge duy nhat la Host Nginx port 80/443.
+- Docker services khong expose public port.
+- 4 private portals bi chan bang browser client cert truoc khi vao app.
+- API protected phai qua JWT va OPA.
+- Gateway goi service bang mTLS.
+- Private key khong dua vao frontend.
+- CA private key va domain private key khong nen commit len git.
+- USB token/HSM nen giu private key trong trien khai that.
 
-Dong bo tu server ve may chinh:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\Admin\Documents\Mật mã học\DEPLOY\D2\scripts\sync_server_certs.ps1"
-```
-
-## 12. Nguyen Tac Bao Mat
-
-- Public HTTPS key nam trong `/etc/letsencrypt`, khong copy len git.
-- CA private key chi de trong state/server, khong dua vao frontend.
-- Private key truy cap nen nam trong USB token neu trien khai that.
-- Officer signing private key khong luu database.
-- QR chi chua token ngau nhien, khong chua tai lieu, khong chua chu ky day du.
-- Docker services khong expose public port; host Nginx la public edge duy nhat.
