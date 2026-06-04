@@ -110,7 +110,7 @@
         <hr style="margin: 15px 0;">
         <div class="form-group">
             <label for="modal-qr-payload">Dán nội dung QR đã quét từ giấy tờ của công dân:</label>
-          <textarea id="modal-qr-payload" rows="6" placeholder="p7b_b64|officer_id|signed_at|citizen_id|doc_id|"></textarea>
+          <textarea id="modal-qr-payload" rows="6" placeholder=""></textarea>
         </div>
         <button class="btn" onclick="performVerification()">Thực hiện xác thực</button>
         <div id="modal-verify-result" style="margin-top: 20px;"></div>
@@ -193,7 +193,13 @@
         const keypairResponse = await fetch('/__keypair', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ algorithm: 'EC-P384' })
+          body: JSON.stringify({
+            algorithm: 'EC-P384',
+            role: 'thirdparty',
+            subject_id: thirdpartyId,
+            key_name: 'mtls',
+            save_to_file: true
+          })
         });
         const keypairData = await keypairResponse.json().catch(() => ({}));
         if (!keypairResponse.ok) throw new Error(keypairData.error || 'Không thể sinh keypair');

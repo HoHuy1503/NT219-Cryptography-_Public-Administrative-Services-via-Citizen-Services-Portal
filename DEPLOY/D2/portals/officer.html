@@ -121,6 +121,8 @@
       <div class="card">
         <h2>Chứng chỉ PKI của tôi</h2>
         <button class="btn" onclick="loadOfficerCertificates()">Tải chứng chỉ</button>
+        <button class="btn secondary" onclick="initializeOfficerSigningKey(true)">Khoi tao khoa ky</button>
+        <div id="signing-key-result"></div>
         <div id="keys-list"></div>
       </div>
 
@@ -230,6 +232,7 @@
         await fetchOfficerDisplayName(data.user_id || officerId);
         document.getElementById('login-result').innerHTML = `<div class="alert success">Đăng nhập thành công.</div>`;
         updateAuthUI();
+        await initializeOfficerSigningKey(false);
         showSection('dashboard');
       } catch (e) {
         clearSession();
@@ -250,12 +253,20 @@
       const ou = document.getElementById('new-user-ou').value.trim() || `CA ${l}`;
       if (!userId || !name || !password) return alert('Vui lòng điền đầy đủ thông tin');
       try {
-        const mtlsKeypairResponse = await fetch('/__keypair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ algorithm: 'EC-P384' }) });
+        const mtlsKeypairResponse = await fetch('/__keypair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ algorithm: 'EC-P384', role: 'officer', subject_id: userId, key_name: 'mtls', save_to_file: true })
+        });
         const mtlsKeypairData = await mtlsKeypairResponse.json().catch(() => ({}));
         if (!mtlsKeypairResponse.ok) throw new Error(mtlsKeypairData.error || 'Không thể sinh EC keypair mTLS');
         localStorage.setItem(`${MTLS_PRIVATE_KEY_STORE_PREFIX}${userId}`, mtlsKeypairData.private_key_pem);
 
-        const signingKeypairResponse = await fetch('/__keypair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ algorithm: 'ML-DSA-44' }) });
+        const signingKeypairResponse = await fetch('/__keypair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ algorithm: 'ML-DSA-44', role: 'officer', subject_id: userId, key_name: 'signing', save_to_file: true })
+        });
         const signingKeypairData = await signingKeypairResponse.json().catch(() => ({}));
         if (!signingKeypairResponse.ok) throw new Error(signingKeypairData.error || 'Không thể tạo khóa ký nghiệp vụ');
         localStorage.setItem(`${PRIVATE_KEY_STORE_PREFIX}${userId}`, signingKeypairData.private_key_pem);
@@ -296,6 +307,66 @@
       return localStorage.getItem(`${PRIVATE_KEY_STORE_PREFIX}${officerId}`) || '';
     }
 
+    async function loadOfficerPrivateKeyFromPath(officerId) {
+      try {
+        const response = await fetch('/__local-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'get', role: 'officer', subject_id: officerId, key_name: 'signing' })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.private_key_pem) return '';
+        localStorage.setItem(`${PRIVATE_KEY_STORE_PREFIX}${officerId}`, data.private_key_pem);
+        return data.private_key_pem;
+      } catch (_) {
+        return '';
+      }
+    }
+
+    async function initializeOfficerSigningKey(showResult) {
+      syncSession();
+      const officerId = localStorage.getItem('user_id');
+      const resultEl = document.getElementById('signing-key-result') || document.getElementById('login-result');
+      if (!sessionId || !officerId) return false;
+      if (getOfficerPrivateKey(officerId) || await loadOfficerPrivateKeyFromPath(officerId)) {
+        if (showResult && resultEl) resultEl.innerHTML = '<div class="alert success">Khoa ky da san sang.</div>';
+        return true;
+      }
+      try {
+        if (showResult && resultEl) resultEl.innerHTML = '<div class="alert info">Dang khoi tao khoa ky...</div>';
+        const keypairResponse = await fetch('/__keypair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            algorithm: 'ML-DSA-44',
+            role: 'officer',
+            subject_id: officerId,
+            key_name: 'signing',
+            save_to_file: true
+          })
+        });
+        const keypairData = await keypairResponse.json().catch(() => ({}));
+        if (!keypairResponse.ok) throw new Error(keypairData.error || 'Khong the tao khoa ky');
+
+        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/register-key`, {
+          method: 'POST',
+          headers: officerAuthHeaders(),
+          body: JSON.stringify({
+            public_key_pem: keypairData.public_key_pem,
+            key_algorithm: 'ML-DSA-44'
+          })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Khong the dang ky khoa ky');
+        localStorage.setItem(`${PRIVATE_KEY_STORE_PREFIX}${officerId}`, keypairData.private_key_pem);
+        if (resultEl) resultEl.innerHTML = `<div class="alert success">Da khoi tao khoa ky phien ban ${data.key_version || ''}.</div>`;
+        return true;
+      } catch (e) {
+        if (resultEl) resultEl.innerHTML = `<div class="alert error">Khong the khoi tao khoa ky: ${e.message}</div>`;
+        return false;
+      }
+    }
+
     async function downloadDocumentRequest(requestId) {
       if (!sessionId) return;
       try {
@@ -325,11 +396,15 @@
         document.getElementById('pending-doc-requests-list').innerHTML = '<div class="alert error">Vui lòng đăng nhập để xem yêu cầu</div>';
         return;
       }
-      const privateKeyPem = getOfficerPrivateKey(officerId);
+      let privateKeyPem = getOfficerPrivateKey(officerId);
       let activeCertPem = null;
       if (!privateKeyPem) {
-        document.getElementById('pending-doc-requests-list').innerHTML = '<div class="error">Không tìm thấy private key local cho officer này.</div>';
-        return;
+        const initialized = await initializeOfficerSigningKey(false);
+        privateKeyPem = getOfficerPrivateKey(officerId);
+        if (!initialized || !privateKeyPem) {
+          document.getElementById('pending-doc-requests-list').innerHTML = '<div class="error">Khong tim thay khoa ky local. Vao tab Chung chi de khoi tao lai.</div>';
+          return;
+        }
       }
 
       // Early UI guard: officer must have at least one active certificate.
@@ -516,7 +591,7 @@
         const keypairResponse = await fetch('/__keypair', { 
           method: 'POST', 
           headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify({ algorithm: 'ML-DSA-44' }) 
+          body: JSON.stringify({ algorithm: 'ML-DSA-44', role: 'officer', subject_id: officerId, key_name: 'signing', save_to_file: true }) 
         });
         const keypairData = await keypairResponse.json().catch(() => ({}));
         if (!keypairResponse.ok) throw new Error(keypairData.error || 'Không thể tạo khóa ký mới');

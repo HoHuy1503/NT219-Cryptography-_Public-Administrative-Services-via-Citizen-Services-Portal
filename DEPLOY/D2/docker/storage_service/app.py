@@ -964,6 +964,33 @@ def hash_password(password: str, salt: str = None):
 DEMO_PORTAL_PASSWORD = os.getenv("DEMO_PORTAL_PASSWORD", "demo12345")
 
 
+def _client_cert_subject_matches(user_type: str, user_id: str) -> bool:
+    """Bind browser client certificate subject to the account being logged in."""
+    if user_type == "citizen":
+        return True
+
+    subject = request.headers.get("X-Client-Cert-Subject", "")
+    verify = request.headers.get("X-Client-Cert-Verify", "")
+    if verify and verify != "SUCCESS":
+        return False
+    if not subject:
+        return False
+
+    expected = {
+        "officer": f"CN={user_id}@officers.hnh2511.xyz",
+        "thirdparty": f"CN={user_id}@thirdparties.hnh2511.xyz",
+        "pki_admin": f"CN={user_id}@pki.hnh2511.xyz",
+        "storage_admin": f"CN={user_id}@dbadmin.hnh2511.xyz",
+    }.get(user_type)
+
+    legacy_single_account_subjects = {
+        ("pki_admin", "pki_admin"): "CN=pki-admin@pki.gt.tc",
+        ("storage_admin", "storage_admin"): "CN=storage-admin@dbadmin.gt.tc",
+    }
+    legacy = legacy_single_account_subjects.get((user_type, user_id))
+    return bool((expected and expected in subject) or (legacy and legacy in subject))
+
+
 def _seed_demo_portal_accounts(cur):
     """Ensure demo accounts exist with a known password for local portal testing."""
     pwd_hash, salt = hash_password(DEMO_PORTAL_PASSWORD)
@@ -1583,8 +1610,9 @@ def complete_document_sign_request(request_id):
             cur.execute(
                 """
                 SELECT cert_id
-                FROM officer_certificates
-                WHERE officer_id = %s
+                FROM identity_certificates
+                WHERE subject_type = 'officer'
+                  AND subject_id = %s
                   AND is_active = TRUE
                   AND expires_at > NOW()
                 ORDER BY created_at DESC
@@ -1627,8 +1655,11 @@ def complete_document_sign_request(request_id):
             cur.execute(
                 """
                 SELECT cert_pem
-                FROM officer_certificates
-                WHERE officer_id = %s AND is_active = TRUE AND expires_at > NOW()
+                FROM identity_certificates
+                WHERE subject_type = 'officer'
+                  AND subject_id = %s
+                  AND is_active = TRUE
+                  AND expires_at > NOW()
                 ORDER BY created_at DESC LIMIT 1
                 """,
                 (signed_by,),
@@ -2183,6 +2214,10 @@ def login_any_type():
             write_audit("LOGIN_FAIL", user_id, user_type.upper(), user_id, status="FAILURE", error_message="password mismatch")
             return jsonify({"error": "Invalid credentials"}), 401
 
+        if not _client_cert_subject_matches(user_type, user_id):
+            write_audit("LOGIN_FAIL", user_id, user_type.upper(), user_id, status="FAILURE", error_message="client cert does not match account")
+            return jsonify({"error": "Client certificate does not match this account"}), 403
+
         # Update last_login
         cur.execute(f"UPDATE {table_name} SET last_login = NOW() WHERE {id_col} = %s", (user_id,))
 
@@ -2234,6 +2269,10 @@ def officer_login():
         if not verify_password(password, user["password_hash"], user["password_salt"]):
             write_audit("LOGIN_FAIL", officer_id, "OFFICER", officer_id, status="FAILURE", error_message="password mismatch")
             return jsonify({"error": "Invalid credentials"}), 401
+
+        if not _client_cert_subject_matches("officer", officer_id):
+            write_audit("LOGIN_FAIL", officer_id, "OFFICER", officer_id, status="FAILURE", error_message="client cert does not match account")
+            return jsonify({"error": "Client certificate does not match this officer account"}), 403
 
         cur.execute("UPDATE officers SET last_login = NOW() WHERE officer_id = %s", (officer_id,))
 
@@ -2507,6 +2546,48 @@ def approve_officer_cert_request(request_id):
         old_key_id = metadata.get("current_key_id")
         subject_type = row.get("subject_type") or "officer"
         subject_id = row.get("subject_id") or row.get("officer_id")
+        cert_profile = row.get("cert_profile") or "mtls_client"
+
+        if cert_profile == "signing" and subject_type == "officer":
+            if old_key_id:
+                cur.execute(
+                    "UPDATE officer_keys SET is_current = FALSE, expires_at = NOW() WHERE key_id = %s",
+                    (old_key_id,)
+                )
+            cur.execute(
+                "UPDATE officer_keys SET is_current = FALSE WHERE officer_id = %s AND is_current = TRUE",
+                (subject_id,)
+            )
+            key_id = f"key-{subject_id}-{uuid.uuid4().hex[:8]}"
+            cur.execute(
+                """
+                INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version)
+                VALUES (%s, %s, %s, %s, TRUE, NOW(), NOW() + INTERVAL '365 days',
+                    (SELECT COALESCE(MAX(key_version), 0) + 1 FROM officer_keys WHERE officer_id = %s))
+                """,
+                (key_id, subject_id, row.get("public_key_pem"), row.get("key_algorithm") or "ML-DSA-44", subject_id)
+            )
+            cur.execute(
+                "UPDATE identity_cert_requests SET status = %s, cert_id = %s, reviewed_at = NOW(), reviewed_by = %s WHERE request_id = %s",
+                ('ISSUED', key_id, getattr(g, 'current_user_id', 'pki_admin'), request_id)
+            )
+            conn.commit()
+            write_audit(
+                "SIGNING_KEY_APPROVED",
+                getattr(g, 'current_user_id', 'pki_admin'),
+                "CERT_REQUEST",
+                request_id,
+                details={"key_id": key_id, "subject_type": subject_type, "subject_id": subject_id, "renewal": is_renewal},
+            )
+            return jsonify({
+                "request_id": request_id,
+                "cert_id": key_id,
+                "key_id": key_id,
+                "subject_type": subject_type,
+                "subject_id": subject_id,
+                "renewal": is_renewal,
+                "message": "Signing key request approved."
+            }), 200
 
         # Call PKI service to issue certificate
         payload = {
@@ -2520,7 +2601,7 @@ def approve_officer_cert_request(request_id):
             "l": row.get("l"),
             "ou": row.get("ou"),
             "purpose": f"{subject_type}_identity",
-            "cert_profile": row.get("cert_profile") or "mtls_client",
+            "cert_profile": cert_profile,
             "key_algorithm": row.get("key_algorithm"),
             "public_key_pem": row.get("public_key_pem"),
             "allow_reissue": True,
@@ -2697,21 +2778,25 @@ def request_cert_renewal():
         
         cur.execute(
             """
-            INSERT INTO officer_cert_requests 
-            (request_id, officer_id, public_key_pem, common_name, organization, country, st, l, ou, status, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO identity_cert_requests
+            (request_id, subject_type, subject_id, public_key_pem, key_algorithm, cert_profile,
+             common_name, organization, country, st, l, ou, status, metadata)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
-                renewal_request_id, 
-                officer_id, 
-                public_key_pem, 
+                renewal_request_id,
+                "officer",
+                officer_id,
+                public_key_pem,
+                "ML-DSA-44",
+                "signing",
                 subject_ou,
-                'OFFICER', 
-                'VN', 
-                'HCM',  # get from session/db if needed
-                'Q12', 
+                "OFFICER",
+                "VN",
+                "HCM",
+                "Q12",
                 subject_ou,
-                'PENDING',
+                "PENDING",
                 json.dumps({"renewal": True, "reason": reason, "current_key_id": current_key.get("key_id") if current_key else None})
             )
         )
@@ -3197,25 +3282,23 @@ def register_officer_public_key(officer_id):
         if not officer:
             return jsonify({"error": "Officer not found"}), 404
         
-        # Check if officer already has a pending key registration or active certificate
+        # Rotate the current business signing key when the browser/local token lost it.
+        cur.execute("SELECT COALESCE(MAX(key_version), 0) AS max_version FROM officer_keys WHERE officer_id = %s", (officer_id,))
+        version_row = cur.fetchone() or {}
+        key_version = int(version_row.get("max_version") or 0) + 1
         cur.execute(
-            "SELECT key_id FROM officer_keys WHERE officer_id = %s AND is_current = TRUE",
+            "UPDATE officer_keys SET is_current = FALSE, rotated_at = NOW() WHERE officer_id = %s AND is_current = TRUE",
             (officer_id,)
         )
-        if cur.fetchone():
-            return jsonify({
-                "error": "Officer already has an active certificate",
-                "message": "Request key rotation if you need a new certificate"
-            }), 409
         
         # Store the public key
         key_id = f"key-{officer_id}-{uuid.uuid4().hex[:8]}"
         cur.execute(
             """
-            INSERT INTO officer_keys (key_id, officer_id, key_type, public_key, is_current, created_at)
-            VALUES (%s, %s, %s, %s, FALSE, NOW())
+            INSERT INTO officer_keys (key_id, officer_id, key_type, public_key_pem, is_current, created_at, key_version)
+            VALUES (%s, %s, %s, %s, TRUE, NOW(), %s)
             """,
-            (key_id, officer_id, key_algorithm, public_key_pem)
+            (key_id, officer_id, key_algorithm, public_key_pem, key_version)
         )
         
         conn.commit()
@@ -3226,8 +3309,9 @@ def register_officer_public_key(officer_id):
             "key_id": key_id,
             "officer_id": officer_id,
             "key_algorithm": key_algorithm,
+            "key_version": key_version,
             "registered_at": datetime.now(timezone.utc).isoformat(),
-            "next_step": "Request certificate from PKI admin or submit via /api/pki/issue-certificate with officer_id"
+            "next_step": "Officer can now sign documents with the local private key"
         }), 201
     except Exception as exc:
         conn.rollback()

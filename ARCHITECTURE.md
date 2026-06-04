@@ -216,9 +216,10 @@ Chuc nang:
 - Khong bat browser client cert cho `citizens`.
 - Gioi han dung client cert theo tung portal bang subject DN:
   - `dbadmin` chi nhan cert storage admin.
-  - `thirdparties` chi nhan cert third party.
+  - `thirdparties` chi nhan cert third party co subject gan voi tung `thirdparty_id`.
   - `pki` chi nhan cert PKI admin.
-  - `officers` chi nhan cert officer.
+  - `officers` chi nhan cert officer co subject gan voi tung `officer_id`.
+- Backend login tiep tuc kiem tra subject cert khop account dang dang nhap. Vi du `officer_demo` phai dung cert co `CN=officer_demo@officers.hnh2511.xyz`; cert cua officer khac khong dang nhap duoc vao account nay.
 - Proxy `/api/` ve `http://127.0.0.1:8080`.
 - Proxy helper route cho officer/thirdparty khi can tao key hoac ky.
 

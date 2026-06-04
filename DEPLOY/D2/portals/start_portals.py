@@ -27,6 +27,14 @@ PORTALS = {
     3004: ("thirdparty.html", "Third-party Portal"),
 }
 
+LOCAL_PRIVATE_ROOT = Path(os.environ.get("LOCAL_PRIVATE_DIR", "/app/local_private")).resolve()
+
+KEY_PATHS = {
+    ("officer", "signing"): ("officers", "signing_private.pem", "signing_public.pem"),
+    ("officer", "mtls"): ("officers", "mtls_private.pem", "mtls_public.pem"),
+    ("thirdparty", "mtls"): ("thirdparties", "mtls_private.pem", "mtls_public.pem"),
+}
+
 class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         # Serve the portal file for root path
@@ -38,10 +46,28 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == '/__keypair':
             self._handle_keypair_request()
             return
+        if self.path == '/__local-key':
+            self._handle_local_key_request()
+            return
         if self.path == '/__sign':
             self._handle_sign_request()
             return
         self.send_error(404, "Not Found")
+
+    def _key_files(self, role, subject_id, key_name):
+        if not subject_id:
+            raise ValueError("subject_id is required")
+        safe_subject = "".join(ch for ch in subject_id if ch.isalnum() or ch in ("_", "-", "."))
+        if safe_subject != subject_id:
+            raise ValueError("subject_id contains unsupported characters")
+        mapping = KEY_PATHS.get((role, key_name))
+        if not mapping:
+            raise ValueError("unsupported role/key_name")
+        role_dir, private_name, public_name = mapping
+        base = (LOCAL_PRIVATE_ROOT / role_dir / safe_subject).resolve()
+        if not str(base).startswith(str(LOCAL_PRIVATE_ROOT)):
+            raise ValueError("invalid key path")
+        return base, base / private_name, base / public_name
 
     def _handle_keypair_request(self):
         try:
@@ -49,6 +75,10 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             raw_body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
             payload = json.loads(raw_body or '{}')
             algorithm = (payload.get('algorithm') or 'ML-DSA-44').strip()
+            role = (payload.get('role') or '').strip()
+            subject_id = (payload.get('subject_id') or '').strip()
+            key_name = (payload.get('key_name') or '').strip()
+            save_to_file = bool(payload.get('save_to_file'))
 
             if algorithm not in ('ML-DSA-44', 'EC-P384', 'ECDSA-P384'):
                 self._send_json(400, {'error': 'Only ML-DSA-44 and EC-P384 are supported'})
@@ -81,14 +111,75 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
                 private_key_pem = priv_path.read_text(encoding='utf-8')
                 public_key_pem = pub_path.read_text(encoding='utf-8')
 
+            private_key_path = None
+            public_key_path = None
+            if save_to_file:
+                base, private_file, public_file = self._key_files(role, subject_id, key_name)
+                base.mkdir(parents=True, exist_ok=True)
+                private_file.write_text(private_key_pem, encoding='utf-8')
+                public_file.write_text(public_key_pem, encoding='utf-8')
+                try:
+                    os.chmod(private_file, 0o600)
+                except OSError:
+                    pass
+                private_key_path = str(private_file)
+                public_key_path = str(public_file)
+
             self._send_json(200, {
                 'algorithm': 'ML-DSA-44' if algorithm == 'ML-DSA-44' else 'EC-P384',
                 'public_key_pem': public_key_pem,
                 'private_key_pem': private_key_pem,
+                'private_key_path': private_key_path,
+                'public_key_path': public_key_path,
             })
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.decode('utf-8', errors='replace') if exc.stderr else str(exc)
             self._send_json(500, {'error': f'Keypair generation failed: {stderr}'})
+        except Exception as exc:
+            self._send_json(500, {'error': str(exc)})
+
+    def _handle_local_key_request(self):
+        try:
+            content_length = int(self.headers.get('Content-Length', '0'))
+            raw_body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
+            payload = json.loads(raw_body or '{}')
+            action = (payload.get('action') or 'get').strip()
+            role = (payload.get('role') or '').strip()
+            subject_id = (payload.get('subject_id') or '').strip()
+            key_name = (payload.get('key_name') or '').strip()
+            base, private_file, public_file = self._key_files(role, subject_id, key_name)
+
+            if action == 'get':
+                if not private_file.exists():
+                    self._send_json(404, {'error': 'private key not found', 'private_key_path': str(private_file)})
+                    return
+                public_key_pem = public_file.read_text(encoding='utf-8') if public_file.exists() else ''
+                self._send_json(200, {
+                    'private_key_pem': private_file.read_text(encoding='utf-8'),
+                    'public_key_pem': public_key_pem,
+                    'private_key_path': str(private_file),
+                    'public_key_path': str(public_file),
+                })
+                return
+
+            if action == 'put':
+                private_key_pem = (payload.get('private_key_pem') or '').strip()
+                public_key_pem = (payload.get('public_key_pem') or '').strip()
+                if not private_key_pem:
+                    self._send_json(400, {'error': 'private_key_pem is required'})
+                    return
+                base.mkdir(parents=True, exist_ok=True)
+                private_file.write_text(private_key_pem + "\n", encoding='utf-8')
+                if public_key_pem:
+                    public_file.write_text(public_key_pem + "\n", encoding='utf-8')
+                try:
+                    os.chmod(private_file, 0o600)
+                except OSError:
+                    pass
+                self._send_json(200, {'private_key_path': str(private_file), 'public_key_path': str(public_file)})
+                return
+
+            self._send_json(400, {'error': 'unsupported action'})
         except Exception as exc:
             self._send_json(500, {'error': str(exc)})
 

@@ -45,6 +45,7 @@ services:
     volumes:
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
       - ./state:/state
+      - ../../domain_key/local_private/pki:/state/pki
       - ./state/mtls:/etc/nginx/mtls:ro
     environment:
       - OPENSSL_DIR=/opt/openssl
@@ -91,6 +92,7 @@ services:
     working_dir: /app/portals
     volumes:
       - ./portals:/app/portals:ro
+      - ../../domain_key/local_private:/app/local_private
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
     command: ["python3", "start_portals.py"]
     environment:
@@ -99,6 +101,7 @@ services:
       - OPENSSL_MODULES=/opt/openssl/lib64/ossl-modules
       - OPENSSL_CONF=/opt/openssl/openssl.cnf
       - LD_LIBRARY_PATH=/opt/openssl/lib64
+      - LOCAL_PRIVATE_DIR=/app/local_private
     depends_on:
       - gateway
     ports:
