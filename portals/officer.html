@@ -133,7 +133,24 @@
 
       <div class="card" style="margin-top: 20px;">
         <h2>Yêu cầu cấp lại chứng chỉ</h2>
-        <button class="btn secondary" onclick="requestCertRenewal()">Gửi yêu cầu gia hạn</button>
+        <p class="subtitle">Tạo khóa trên trusted device, sau đó gửi public key, CSR và khóa đã mã hóa để PKI duyệt.</p>
+        <div class="form-group">
+          <label for="signing-public-file">Public key</label>
+          <input type="file" id="signing-public-file" accept=".pem,.txt">
+        </div>
+        <div class="form-group">
+          <label for="signing-csr-file">CSR</label>
+          <input type="file" id="signing-csr-file" accept=".pem,.csr,.txt">
+        </div>
+        <div class="form-group">
+          <label for="signing-encrypted-key-file">Khóa đã mã hóa</label>
+          <input type="file" id="signing-encrypted-key-file" accept=".b64,.enc,.txt">
+        </div>
+        <div class="form-group">
+          <label for="signing-kdf-file">Thông tin giải mã</label>
+          <input type="file" id="signing-kdf-file" accept=".json,.txt">
+        </div>
+        <button class="btn secondary" onclick="requestSigningCertificate()">Gửi yêu cầu cấp chứng chỉ ký</button>
         <div id="reissue-result"></div>
       </div>
 
@@ -552,30 +569,52 @@
       return loadOfficerCertificates();
     }
 
-    async function requestCertRenewal() {
-      document.getElementById('reissue-result').innerHTML = `<div class="alert info">Tao key ky moi tren trusted device bang script generate_client_key_material.ps1 -BusinessSigningKey, sau do gui public key va encrypted blob cho PKI de cap lai cert.</div>`;
-      return;
-      if (!sessionId) return (document.getElementById('reissue-result').innerHTML = `<div class="error">Vui lòng đăng nhập để yêu cầu cấp lại cert</div>`);
+    function readSelectedText(inputId) {
+      const input = document.getElementById(inputId);
+      const file = input?.files?.[0];
+      if (!file) return Promise.reject(new Error(`Chưa chọn file: ${inputId}`));
+      return file.text();
+    }
+
+    async function requestSigningCertificate() {
+      const resultEl = document.getElementById('reissue-result');
+      if (!sessionId) return (resultEl.innerHTML = `<div class="error">Vui lòng đăng nhập để gửi yêu cầu cấp chứng chỉ</div>`);
       const officerId = localStorage.getItem('user_id');
-      if (!officerId) return (document.getElementById('reissue-result').innerHTML = `<div class="error">Không tìm thấy Officer ID trong session</div>`);
+      if (!officerId) return (resultEl.innerHTML = `<div class="error">Không tìm thấy Officer ID trong phiên đăng nhập</div>`);
       
       try {
-        // Submit renewal request to storage service (subject comes from session)
-        const response = await fetch(`${API_URL}/api/storage/officer-cert-requests/renew`, { 
+        const [publicKeyPem, csrPem, encryptedBlob, kdfRaw] = await Promise.all([
+          readSelectedText('signing-public-file'),
+          readSelectedText('signing-csr-file'),
+          readSelectedText('signing-encrypted-key-file'),
+          readSelectedText('signing-kdf-file')
+        ]);
+        let kdfParams = {};
+        try {
+          kdfParams = JSON.parse(kdfRaw);
+        } catch (_) {
+          throw new Error('File thông tin giải mã phải là JSON hợp lệ');
+        }
+
+        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/register-key`, { 
           method: 'POST', 
           headers: officerAuthHeaders(), 
           body: JSON.stringify({ 
-            officer_id: officerId,
-            reason: "officer_initiated_renewal"
+            public_key_pem: publicKeyPem.trim(),
+            csr_pem: csrPem.trim(),
+            encrypted_private_key_blob: encryptedBlob.trim(),
+            encrypted_private_key_format: 'openssl-enc-aes-256-cbc-pbkdf2',
+            kdf_params: kdfParams,
+            key_type: 'ML-DSA-44'
           }) 
         });
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'Không thể gửi yêu cầu cấp lại cert');
+        if (!response.ok) throw new Error(data.error || 'Không thể gửi yêu cầu cấp chứng chỉ');
         
-        document.getElementById('reissue-result').innerHTML = `<div class="success">Yêu cầu cấp lại cert đã được gửi </div>`;
+        resultEl.innerHTML = `<div class="success">Đã gửi yêu cầu cấp chứng chỉ. Mã yêu cầu: ${data.request_id || 'đang chờ PKI duyệt'}.</div>`;
         setTimeout(() => loadOfficerCertificates(), 1000);
       } catch (e) {
-        document.getElementById('reissue-result').innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
+        resultEl.innerHTML = `<div class="error">Lỗi: ${e.message}</div>`;
       }
     }
 
