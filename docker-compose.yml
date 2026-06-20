@@ -45,8 +45,8 @@ services:
     volumes:
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
       - ./state:/state
-      - ../../domain_key/local_private/pki:/state/pki
-      - ../../domain_key/browser_clients/ca:/state/browser_client_ca:ro
+      - ./domain_key/local_private/pki:/state/pki
+      - ./domain_key/browser_clients/ca:/state/browser_client_ca:ro
       - ./docker/openssl-minimal.cnf:/etc/govportal/openssl.cnf:ro
       - ./state/mtls:/etc/nginx/mtls:ro
     environment:
@@ -95,7 +95,7 @@ services:
     working_dir: /app/portals
     volumes:
       - ./portals:/app/portals:ro
-      - ../../domain_key/local_private:/app/local_private
+      - ./domain_key/local_private:/app/local_private
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
       - ./docker/openssl-minimal.cnf:/etc/govportal/openssl.cnf:ro
     command: ["python3", "start_portals.py"]

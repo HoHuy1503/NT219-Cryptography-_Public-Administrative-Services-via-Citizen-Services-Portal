@@ -61,7 +61,7 @@ $Days = [int]$daysInput
 $PfxPassword = Read-Default "P12 password" $PfxPassword
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot = Resolve-Path (Join-Path $scriptDir "..\..\..")
+$repoRoot = Resolve-Path (Join-Path $scriptDir "..")
 $domainKeyRoot = Join-Path $repoRoot "domain_key"
 $caDir = Join-Path $domainKeyRoot "browser_clients\ca"
 $caCert = Join-Path $caDir "portal-client-ca.crt"

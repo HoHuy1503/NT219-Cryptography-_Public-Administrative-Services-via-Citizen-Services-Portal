@@ -27,7 +27,7 @@ if (-not (Test-Path -LiteralPath $KeyPath)) {
 }
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..\..\..")
+$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..")
 
 $Timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 

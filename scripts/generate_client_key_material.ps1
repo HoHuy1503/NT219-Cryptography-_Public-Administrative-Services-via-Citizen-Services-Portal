@@ -19,7 +19,7 @@ if (-not $UserId) {
   throw "UserId is required"
 }
 
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $safeUserId = $UserId -replace '[^A-Za-z0-9_.-]', '_'
 $outDir = Join-Path $repoRoot "domain_key\client_private\$Role\$safeUserId"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null

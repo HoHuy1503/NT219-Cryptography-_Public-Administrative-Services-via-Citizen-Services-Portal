@@ -38,7 +38,7 @@ server {
   server_name citizens.hnh2511.xyz;
     ssl_certificate /etc/letsencrypt/live/citizens.hnh2511.xyz/fullchain.pem; # managed by Certbot
     ssl_certificate_key /etc/letsencrypt/live/citizens.hnh2511.xyz/privkey.pem; # managed by Certbot
-  root /opt/govportal/DEPLOY/D2/portals;
+  root /opt/govportal/portals;
   location = / { try_files /citizen.html =404; }
   location / { try_files $uri /citizen.html =404; }
   location /api/ {
@@ -59,7 +59,7 @@ server {
   ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
   ssl_verify_client on;
   ssl_verify_depth 2;
-  root /opt/govportal/DEPLOY/D2/portals;
+  root /opt/govportal/portals;
   location = / { try_files /storage.html =404; }
   location / { try_files $uri /storage.html =404; }
   location /api/ {
@@ -83,7 +83,7 @@ server {
   ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
   ssl_verify_client on;
   ssl_verify_depth 2;
-  root /opt/govportal/DEPLOY/D2/portals;
+  root /opt/govportal/portals;
   location = / { try_files /thirdparty.html =404; }
   location / { try_files $uri /thirdparty.html =404; }
   location /api/ {
@@ -107,7 +107,7 @@ server {
   ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
   ssl_verify_client on;
   ssl_verify_depth 2;
-  root /opt/govportal/DEPLOY/D2/portals;
+  root /opt/govportal/portals;
   location = / { try_files /pki.html =404; }
   location / { try_files $uri /pki.html =404; }
   location /api/ {
@@ -131,7 +131,7 @@ server {
   ssl_client_certificate /opt/govportal/domain_key/browser_clients/ca/portal-client-ca.crt;
   ssl_verify_client on;
   ssl_verify_depth 2;
-  root /opt/govportal/DEPLOY/D2/portals;
+  root /opt/govportal/portals;
   location = / { try_files /officer.html =404; }
   location / { try_files $uri /officer.html =404; }
   location /api/ {

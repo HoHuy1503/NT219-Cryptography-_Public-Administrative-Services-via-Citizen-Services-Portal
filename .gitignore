@@ -11,11 +11,12 @@ __pycache__/
 
 # Local tooling and generated report artifacts
 .tools/
+Report/
 Mật_mã_học/
 
 # Report/evidence capture helpers are local-only
-DEPLOY/D2/scripts/capture_*
-DEPLOY/D2/scripts/*evidence*
+scripts/capture_*
+scripts/*evidence*
 
 # Local private client material
 domain_key/client_private/

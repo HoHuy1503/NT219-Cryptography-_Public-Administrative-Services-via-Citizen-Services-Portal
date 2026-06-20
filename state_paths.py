@@ -1,6 +1,6 @@
 """Canonical paths for cryptographic material under state/.
 
-Layout (relative to STATE_ROOT, default DEPLOY/D2/state when running locally):
+Layout (relative to STATE_ROOT, default state/ when running locally):
 
   jwt/       jwt_ec_private.pem, jwt_ec_public.pem, jwks.json
   mtls/      ca/, gateway/, services/, clients/

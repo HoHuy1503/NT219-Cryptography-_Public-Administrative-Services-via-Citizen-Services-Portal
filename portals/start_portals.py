@@ -46,7 +46,7 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == '/__keypair':
             self._send_json(410, {
                 'error': 'server_side_key_generation_disabled',
-                'message': 'Generate key material on the client with DEPLOY/D2/scripts/generate_client_key_material.ps1.',
+                'message': 'Generate key material on the client with scripts/generate_client_key_material.ps1.',
             })
             return
         if self.path == '/__local-key':

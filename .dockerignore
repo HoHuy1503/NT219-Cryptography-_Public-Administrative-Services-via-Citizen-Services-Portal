@@ -1,0 +1,16 @@
+.git
+.gitignore
+.dockerignore
+
+DEPLOY
+Report
+domain_key
+state
+.tools
+
+__pycache__
+*.pyc
+*.log
+*.key
+*.pem
+*.p12

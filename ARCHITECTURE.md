@@ -358,18 +358,23 @@ Important public paths:
 | --- | --- |
 | `ARCHITECTURE.md` | Tai lieu kien truc hien tai |
 | `domain_key/` | Backup local cua cert/key public HTTPS, browser client cert, va Nginx config |
-| `DEPLOY/D2/` | Stack deploy chinh cua he thong |
+| `docker-compose.yml` | Khai bao toan bo Docker services, networks, volumes, ports |
+| `state_paths.py` | Helper duong dan state runtime |
+| `docker/` | Source cua cac service backend va gateway |
+| `portals/` | 5 giao dien HTML va portal helper |
+| `scripts/` | Script tao cert, xin HTTPS cert, sync cert tu server ve may chinh |
+| `nginx-public/` | Template Nginx public cho host VM |
 
-### 4.2 DEPLOY/D2
+### 4.2 Thu muc trien khai
 
 | Path | Chuc nang |
 | --- | --- |
-| `DEPLOY/D2/docker-compose.yml` | Khai bao toan bo Docker services, networks, volumes, ports |
-| `DEPLOY/D2/state_paths.py` | Helper duong dan state runtime |
-| `DEPLOY/D2/docker/` | Source cua cac service backend va gateway |
-| `DEPLOY/D2/portals/` | 5 giao dien HTML va portal helper |
-| `DEPLOY/D2/scripts/` | Script tao cert, xin HTTPS cert, sync cert tu server ve may chinh |
-| `DEPLOY/D2/nginx-public/` | Template Nginx public cho host VM |
+| `docker-compose.yml` | Khai bao toan bo Docker services, networks, volumes, ports |
+| `state_paths.py` | Helper duong dan state runtime |
+| `docker/` | Source cua cac service backend va gateway |
+| `portals/` | 5 giao dien HTML va portal helper |
+| `scripts/` | Script tao cert, xin HTTPS cert, sync cert tu server ve may chinh |
+| `nginx-public/` | Template Nginx public cho host VM |
 
 ### 4.3 Docker services
 
@@ -414,7 +419,7 @@ Important public paths:
 File chinh:
 
 ```text
-DEPLOY/D2/docker-compose.yml
+docker-compose.yml
 ```
 
 Services:
@@ -460,7 +465,7 @@ Chuc nang:
 
 - Dung Let's Encrypt cert de terminate HTTPS public.
 - Redirect HTTP sang HTTPS.
-- Serve 5 portal static files tu `/opt/govportal/DEPLOY/D2/portals`.
+- Serve 5 portal static files tu `/opt/govportal/portals`.
 - Bat browser client cert cho `dbadmin`, `thirdparties`, `pki`, `officers`.
 - Khong bat browser client cert cho `citizens`.
 - Gioi han dung client cert theo tung portal bang subject DN:
@@ -483,7 +488,7 @@ Trust bundle cho browser client cert:
 File:
 
 ```text
-DEPLOY/D2/docker/gateway/nginx.conf
+docker/gateway/nginx.conf
 ```
 
 Chuc nang:
@@ -512,7 +517,7 @@ Include files:
 Policy file:
 
 ```text
-DEPLOY/D2/docker/opa/policies/authz.rego
+docker/opa/policies/authz.rego
 ```
 
 Auth flow:
@@ -598,15 +603,15 @@ Dung de gateway goi storage/doc/qr qua mTLS.
 Runtime path:
 
 ```text
-DEPLOY/D2/state/mtls/ca/ca.crt
-DEPLOY/D2/state/mtls/gateway/client.crt
-DEPLOY/D2/state/mtls/gateway/client.key
-DEPLOY/D2/state/mtls/services/storage.crt
-DEPLOY/D2/state/mtls/services/storage.key
-DEPLOY/D2/state/mtls/services/doc.crt
-DEPLOY/D2/state/mtls/services/doc.key
-DEPLOY/D2/state/mtls/services/qr.crt
-DEPLOY/D2/state/mtls/services/qr.key
+state/mtls/ca/ca.crt
+state/mtls/gateway/client.crt
+state/mtls/gateway/client.key
+state/mtls/services/storage.crt
+state/mtls/services/storage.key
+state/mtls/services/doc.crt
+state/mtls/services/doc.key
+state/mtls/services/qr.crt
+state/mtls/services/qr.key
 ```
 
 Docker mount:
@@ -624,9 +629,9 @@ Dung de cap cert cho officer/thirdparty theo luong request/approve/download.
 Runtime path:
 
 ```text
-DEPLOY/D2/state/pki/ca_key.pem
-DEPLOY/D2/state/pki/ca_cert.pem
-DEPLOY/D2/state/pki/issued_certs.json
+state/pki/ca_key.pem
+state/pki/ca_cert.pem
+state/pki/issued_certs.json
 ```
 
 `ca_key.pem` la private key CA, can bao ve cao nhat. `ca_cert.pem` la public CA cert.
