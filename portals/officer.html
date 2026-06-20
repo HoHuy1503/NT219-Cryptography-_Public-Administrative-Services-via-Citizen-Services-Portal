@@ -126,6 +126,7 @@
         <h2>Chứng chỉ PKI của tôi</h2>
         <button class="btn" onclick="loadOfficerCertificates()">Tải chứng chỉ</button>
         <button class="btn secondary" onclick="initializeOfficerSigningKey(true)">Khoi tao khoa ky</button>
+        <button class="btn secondary" onclick="downloadEncryptedSigningKey()">Tải khóa ký mã hóa</button>
         <div id="signing-key-result"></div>
         <div id="keys-list"></div>
       </div>
@@ -494,6 +495,43 @@
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
+    }
+
+    function downloadText(filename, content) {
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function downloadEncryptedSigningKey() {
+      const resultEl = document.getElementById('signing-key-result');
+      if (!sessionId) {
+        resultEl.innerHTML = `<div class="alert error">Vui lòng đăng nhập để tải khóa ký.</div>`;
+        return;
+      }
+      const officerId = localStorage.getItem('user_id');
+      if (!officerId) {
+        resultEl.innerHTML = `<div class="alert error">Không tìm thấy tài khoản officer trong phiên đăng nhập.</div>`;
+        return;
+      }
+      try {
+        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/encrypted-signing-key/current`, { headers: officerAuthHeaders() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || 'Không thể tải khóa ký mã hóa');
+
+        const baseName = `${officerId}-business-signing`;
+        downloadText(`${baseName}-key.enc.b64`, data.encrypted_private_key_blob || '');
+        downloadText(`${baseName}-kdf.json`, JSON.stringify(data.kdf_params || {}, null, 2));
+        downloadText(`${baseName}-public.pem`, data.public_key_pem || '');
+
+        resultEl.innerHTML = `<div class="alert success">Đã tải khóa ký mã hóa về máy. Chỉ giải mã trên trusted device khi ký tài liệu.</div>`;
+      } catch (e) {
+        resultEl.innerHTML = `<div class="alert error">Lỗi tải khóa ký: ${e.message}</div>`;
+      }
     }
 
     async function downloadCertificate(certId) {
