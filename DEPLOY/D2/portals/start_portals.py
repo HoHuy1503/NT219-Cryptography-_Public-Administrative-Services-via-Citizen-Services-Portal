@@ -44,10 +44,16 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == '/__keypair':
-            self._handle_keypair_request()
+            self._send_json(410, {
+                'error': 'server_side_key_generation_disabled',
+                'message': 'Generate key material on the client with DEPLOY/D2/scripts/generate_client_key_material.ps1.',
+            })
             return
         if self.path == '/__local-key':
-            self._handle_local_key_request()
+            self._send_json(410, {
+                'error': 'server_side_private_key_storage_disabled',
+                'message': 'Private keys must stay on the client and are not loaded by the portal server.',
+            })
             return
         if self.path == '/__sign':
             self._handle_sign_request()
@@ -184,64 +190,10 @@ class SimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json(500, {'error': str(exc)})
 
     def _handle_sign_request(self):
-        try:
-            content_length = int(self.headers.get('Content-Length', '0'))
-            raw_body = self.rfile.read(content_length).decode('utf-8') if content_length else '{}'
-            payload = json.loads(raw_body or '{}')
-            document_base64 = (payload.get('document_base64') or '').strip()
-            private_key_pem = (payload.get('private_key_pem') or '').strip()
-
-            if not document_base64:
-                self._send_json(400, {'error': 'document_base64 is required'})
-                return
-            if not private_key_pem:
-                self._send_json(400, {'error': 'private_key_pem is required for officer signing'})
-                return
-
-            openssl_bin = os.environ.get('OPENSSL_BIN', '/opt/openssl/apps/openssl')
-            openssl_conf = os.environ.get('OPENSSL_CONF', '/opt/openssl/apps/openssl.cnf')
-            openssl_modules = os.environ.get('OPENSSL_MODULES', '/opt/openssl/providers')
-            openssl_lib_dir = os.environ.get('OPENSSL_LIB_DIR', '/opt/openssl')
-
-            if not os.path.exists(openssl_bin):
-                self._send_json(500, {'error': f'OpenSSL binary not found: {openssl_bin}'})
-                return
-
-            env = os.environ.copy()
-            env['OPENSSL_CONF'] = openssl_conf
-            env['OPENSSL_MODULES'] = openssl_modules
-            env['LD_LIBRARY_PATH'] = openssl_lib_dir
-
-            import base64
-            doc_bytes = base64.b64decode(document_base64)
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir_path = Path(tmpdir)
-                priv_path = tmpdir_path / 'officer_private.pem'
-                msg_path = tmpdir_path / 'message.bin'
-                sig_path = tmpdir_path / 'signature.bin'
-
-                priv_path.write_text(private_key_pem, encoding='utf-8')
-                msg_path.write_bytes(doc_bytes)
-
-                subprocess.run(
-                    [openssl_bin, 'pkeyutl', '-sign', '-rawin', '-inkey', str(priv_path), '-in', str(msg_path), '-out', str(sig_path)],
-                    check=True,
-                    capture_output=True,
-                    env=env,
-                )
-
-                signature_b64 = base64.b64encode(sig_path.read_bytes()).decode('ascii')
-
-            self._send_json(200, {
-                'signature': signature_b64,
-                'signature_algorithm': 'ML-DSA',
-            })
-        except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr.decode('utf-8', errors='replace') if exc.stderr else str(exc)
-            self._send_json(500, {'error': f'Signing failed: {stderr}'})
-        except Exception as exc:
-            self._send_json(500, {'error': str(exc)})
+        self._send_json(410, {
+            'error': 'server_side_signing_disabled',
+            'message': 'Sign documents on the client with the local business private key, then submit the signature.',
+        })
 
     def _send_json(self, status_code, payload):
         data = json.dumps(payload).encode('utf-8')

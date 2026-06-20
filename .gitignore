@@ -8,3 +8,15 @@ __pycache__/
 *.log
 .venv/
 .vscode/
+
+# Local tooling and generated report artifacts
+.tools/
+Mật_mã_học/
+
+# Report/evidence capture helpers are local-only
+DEPLOY/D2/scripts/capture_*
+DEPLOY/D2/scripts/*evidence*
+
+# Local private client material
+domain_key/client_private/
+domain_key/browser_clients_legacy_backup_*/

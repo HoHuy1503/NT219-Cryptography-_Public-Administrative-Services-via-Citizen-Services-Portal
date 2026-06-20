@@ -94,6 +94,10 @@
             <label for="new-user-ou">Đơn vị (OU)</label>
             <input type="text" id="new-user-ou" placeholder="CA Q12">
           </div>
+          <div class="form-group">
+            <label for="new-user-mtls-public-key">Public key truy cap</label>
+            <textarea id="new-user-mtls-public-key" rows="5" placeholder="Dan public key EC tao o may cua ban"></textarea>
+          </div>
           <button class="btn" onclick="createUser()">Đăng ký</button>
           <div id="user-result"></div>
         </div>
@@ -251,26 +255,10 @@
       const st = document.getElementById('new-user-st').value.trim() || 'HCM';
       const l = document.getElementById('new-user-l').value.trim() || 'Q12';
       const ou = document.getElementById('new-user-ou').value.trim() || `CA ${l}`;
+      const mtlsPublicKeyPem = document.getElementById('new-user-mtls-public-key').value.trim();
       if (!userId || !name || !password) return alert('Vui lòng điền đầy đủ thông tin');
+      if (!mtlsPublicKeyPem) return alert('Vui lòng tạo key EC mTLS ở USB/browser token rồi dán public key vào form');
       try {
-        const mtlsKeypairResponse = await fetch('/__keypair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ algorithm: 'EC-P384', role: 'officer', subject_id: userId, key_name: 'mtls', save_to_file: true })
-        });
-        const mtlsKeypairData = await mtlsKeypairResponse.json().catch(() => ({}));
-        if (!mtlsKeypairResponse.ok) throw new Error(mtlsKeypairData.error || 'Không thể sinh EC keypair mTLS');
-        localStorage.setItem(`${MTLS_PRIVATE_KEY_STORE_PREFIX}${userId}`, mtlsKeypairData.private_key_pem);
-
-        const signingKeypairResponse = await fetch('/__keypair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ algorithm: 'ML-DSA-44', role: 'officer', subject_id: userId, key_name: 'signing', save_to_file: true })
-        });
-        const signingKeypairData = await signingKeypairResponse.json().catch(() => ({}));
-        if (!signingKeypairResponse.ok) throw new Error(signingKeypairData.error || 'Không thể tạo khóa ký nghiệp vụ');
-        localStorage.setItem(`${PRIVATE_KEY_STORE_PREFIX}${userId}`, signingKeypairData.private_key_pem);
-
         const response = await fetch(`${API_URL}/api/storage/register/officer`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -281,8 +269,7 @@
             password,
             department,
             region_code: regionCode || undefined,
-            mtls_public_key_pem: mtlsKeypairData.public_key_pem,
-            signing_public_key_pem: signingKeypairData.public_key_pem,
+            mtls_public_key_pem: mtlsPublicKeyPem,
             st,
             l,
             ou
@@ -328,43 +315,14 @@
       const officerId = localStorage.getItem('user_id');
       const resultEl = document.getElementById('signing-key-result') || document.getElementById('login-result');
       if (!sessionId || !officerId) return false;
-      if (getOfficerPrivateKey(officerId) || await loadOfficerPrivateKeyFromPath(officerId)) {
+      if (getOfficerPrivateKey(officerId)) {
         if (showResult && resultEl) resultEl.innerHTML = '<div class="alert success">Khoa ky da san sang.</div>';
         return true;
       }
-      try {
-        if (showResult && resultEl) resultEl.innerHTML = '<div class="alert info">Dang khoi tao khoa ky...</div>';
-        const keypairResponse = await fetch('/__keypair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            algorithm: 'ML-DSA-44',
-            role: 'officer',
-            subject_id: officerId,
-            key_name: 'signing',
-            save_to_file: true
-          })
-        });
-        const keypairData = await keypairResponse.json().catch(() => ({}));
-        if (!keypairResponse.ok) throw new Error(keypairData.error || 'Khong the tao khoa ky');
-
-        const response = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/register-key`, {
-          method: 'POST',
-          headers: officerAuthHeaders(),
-          body: JSON.stringify({
-            public_key_pem: keypairData.public_key_pem,
-            key_algorithm: 'ML-DSA-44'
-          })
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || 'Khong the dang ky khoa ky');
-        localStorage.setItem(`${PRIVATE_KEY_STORE_PREFIX}${officerId}`, keypairData.private_key_pem);
-        if (resultEl) resultEl.innerHTML = `<div class="alert success">Da khoi tao khoa ky phien ban ${data.key_version || ''}.</div>`;
-        return true;
-      } catch (e) {
-        if (resultEl) resultEl.innerHTML = `<div class="alert error">Khong the khoi tao khoa ky: ${e.message}</div>`;
-        return false;
+      if (showResult && resultEl) {
+        resultEl.innerHTML = '<div class="alert info">Khoa ky nghiep vu duoc tai dang ma hoa va chi giai ma tren trusted device. USB/browser cert chi dung cho mTLS.</div>';
       }
+      return false;
     }
 
     async function downloadDocumentRequest(requestId) {
@@ -396,25 +354,13 @@
         document.getElementById('pending-doc-requests-list').innerHTML = '<div class="alert error">Vui lòng đăng nhập để xem yêu cầu</div>';
         return;
       }
-      let privateKeyPem = getOfficerPrivateKey(officerId);
-      let activeCertPem = null;
-      if (!privateKeyPem) {
-        const initialized = await initializeOfficerSigningKey(false);
-        privateKeyPem = getOfficerPrivateKey(officerId);
-        if (!initialized || !privateKeyPem) {
-          document.getElementById('pending-doc-requests-list').innerHTML = '<div class="error">Khong tim thay khoa ky local. Vao tab Chung chi de khoi tao lai.</div>';
-          return;
-        }
-      }
-
       // Early UI guard: officer must have at least one active certificate.
       try {
         const certResp = await fetch(`${API_URL}/api/storage/officers/${encodeURIComponent(officerId)}/certificates`, { headers: officerAuthHeaders() });
         const certData = await certResp.json().catch(() => ({}));
         if (!certResp.ok) throw new Error(certData.error || 'Không thể kiểm tra chứng chỉ officer');
           const activeCert = (certData.certificates || []).find(cert => cert.is_active === true);
-          activeCertPem = activeCert && activeCert.cert_pem ? activeCert.cert_pem : null;
-          const hasActiveCert = !!activeCertPem;
+          const hasActiveCert = !!activeCert;
         if (!hasActiveCert) {
           document.getElementById('pending-doc-requests-list').innerHTML = '<div class="error">Officer chưa có chứng chỉ còn hiệu lực, không thể ký tài liệu.</div>';
           return;
@@ -430,27 +376,14 @@
         if (!requestResp.ok) throw new Error(requestData.error || 'Không thể tải dữ liệu yêu cầu');
         const requestItem = requestData.request || {};
 
-        const signResp = await fetch('/__sign', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            document_base64: requestItem.document_base64,
-            private_key_pem: privateKeyPem,
-          })
-        });
-        const signData = await signResp.json().catch(() => ({}));
-        if (!signResp.ok) throw new Error(signData.error || 'Không thể ký tài liệu');
-
-        // Do not send signer identity from the client; server will use authenticated session.
+        const signature = prompt('Dan chu ky detached base64 duoc tao tren trusted device');
+        if (!signature || !signature.trim()) {
+          throw new Error('Can chu ky detached base64 de hoan tat yeu cau');
+        }
         const completeResp = await fetch(`${API_URL}/api/storage/document-sign-requests/${requestId}/complete`, {
           method: 'POST',
           headers: officerAuthHeaders(),
-          body: JSON.stringify({
-            signature: signData.signature,
-            signature_algorithm: signData.signature_algorithm,
-              private_key_pem: privateKeyPem,
-              cert_pem: activeCertPem,
-          })
+          body: JSON.stringify({ signature: signature.trim() })
         });
         const completeData = await completeResp.json().catch(() => ({}));
         if (!completeResp.ok) throw new Error(completeData.error || 'Không thể cập nhật trạng thái yêu cầu');
@@ -582,33 +515,20 @@
     }
 
     async function requestCertRenewal() {
+      document.getElementById('reissue-result').innerHTML = `<div class="alert info">Tao key ky moi tren trusted device bang script generate_client_key_material.ps1 -BusinessSigningKey, sau do gui public key va encrypted blob cho PKI de cap lai cert.</div>`;
+      return;
       if (!sessionId) return (document.getElementById('reissue-result').innerHTML = `<div class="error">Vui lòng đăng nhập để yêu cầu cấp lại cert</div>`);
       const officerId = localStorage.getItem('user_id');
       if (!officerId) return (document.getElementById('reissue-result').innerHTML = `<div class="error">Không tìm thấy Officer ID trong session</div>`);
       
       try {
-        // Generate a new business signing keypair.
-        const keypairResponse = await fetch('/__keypair', { 
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify({ algorithm: 'ML-DSA-44', role: 'officer', subject_id: officerId, key_name: 'signing', save_to_file: true }) 
-        });
-        const keypairData = await keypairResponse.json().catch(() => ({}));
-        if (!keypairResponse.ok) throw new Error(keypairData.error || 'Không thể tạo khóa ký mới');
-        
-        // Store new private key with a "renewal" suffix in localStorage
-        const renewalKeyId = `${PRIVATE_KEY_STORE_PREFIX}${officerId}_renewal_${Date.now()}`;
-        localStorage.setItem(renewalKeyId, keypairData.private_key_pem);
-        
         // Submit renewal request to storage service (subject comes from session)
         const response = await fetch(`${API_URL}/api/storage/officer-cert-requests/renew`, { 
           method: 'POST', 
           headers: officerAuthHeaders(), 
           body: JSON.stringify({ 
             officer_id: officerId,
-            public_key_pem: keypairData.public_key_pem,
-            reason: "officer_initiated_renewal",
-            renewal_key_storage_id: renewalKeyId
+            reason: "officer_initiated_renewal"
           }) 
         });
         const data = await response.json().catch(() => ({}));

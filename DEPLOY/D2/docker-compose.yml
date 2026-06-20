@@ -46,19 +46,22 @@ services:
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
       - ./state:/state
       - ../../domain_key/local_private/pki:/state/pki
+      - ../../domain_key/browser_clients/ca:/state/browser_client_ca:ro
+      - ./docker/openssl-minimal.cnf:/etc/govportal/openssl.cnf:ro
       - ./state/mtls:/etc/nginx/mtls:ro
     environment:
       - OPENSSL_DIR=/opt/openssl
       - OPENSSL_BIN=/opt/openssl/bin/openssl
       - OPENSSL_LIB_DIR=/opt/openssl/lib64
       - OPENSSL_MODULES=/opt/openssl/lib64/ossl-modules
-      - OPENSSL_CONF=/opt/openssl/openssl.cnf
+      - OPENSSL_CONF=/etc/govportal/openssl.cnf
       - LD_LIBRARY_PATH=/opt/openssl/lib64
       - PATH=/opt/openssl/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/docdb
       - DOC_STATE_DIR=/state
       - STATE_ROOT=/state
       - STORAGE_SERVICE_URL=http://storage_service:9003
+      - BROWSER_CLIENT_CA_DIR=/state/browser_client_ca
     networks:
       - internal
 
@@ -94,12 +97,13 @@ services:
       - ./portals:/app/portals:ro
       - ../../domain_key/local_private:/app/local_private
       - /home/hnh/Documents/openssl/openssl-3.6.1:/opt/openssl:ro
+      - ./docker/openssl-minimal.cnf:/etc/govportal/openssl.cnf:ro
     command: ["python3", "start_portals.py"]
     environment:
       - OPENSSL_BIN=/opt/openssl/bin/openssl
       - OPENSSL_LIB_DIR=/opt/openssl/lib64
       - OPENSSL_MODULES=/opt/openssl/lib64/ossl-modules
-      - OPENSSL_CONF=/opt/openssl/openssl.cnf
+      - OPENSSL_CONF=/etc/govportal/openssl.cnf
       - LD_LIBRARY_PATH=/opt/openssl/lib64
       - LOCAL_PRIVATE_DIR=/app/local_private
     depends_on:

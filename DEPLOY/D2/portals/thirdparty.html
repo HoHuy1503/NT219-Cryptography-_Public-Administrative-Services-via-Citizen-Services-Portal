@@ -94,6 +94,10 @@
             <label for="reg-thirdparty-password">Mật khẩu</label>
             <input type="password" id="reg-thirdparty-password">
           </div>
+          <div class="form-group">
+            <label for="reg-thirdparty-mtls-public-key">Public key truy cap</label>
+            <textarea id="reg-thirdparty-mtls-public-key" rows="5" placeholder="Dan public key EC tao o may cua ban"></textarea>
+          </div>
           <button class="btn" onclick="registerThirdParty()">Đăng ký</button>
           <div id="register-result"></div>
         </div>
@@ -183,32 +187,22 @@
       const email = document.getElementById('reg-thirdparty-email').value.trim();
       const contactPerson = document.getElementById('reg-thirdparty-contact').value.trim();
       const password = document.getElementById('reg-thirdparty-password').value.trim();
+      const mtlsPublicKeyPem = document.getElementById('reg-thirdparty-mtls-public-key').value.trim();
 
       if (!thirdpartyId || !orgName || !email || !password) {
         alert('Vui lòng điền đầy đủ thông tin');
         return;
       }
+      if (!mtlsPublicKeyPem) {
+        alert('Vui lòng tạo key ở máy của bạn rồi dán public key vào form');
+        return;
+      }
 
       try {
-        const keypairResponse = await fetch('/__keypair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            algorithm: 'EC-P384',
-            role: 'thirdparty',
-            subject_id: thirdpartyId,
-            key_name: 'mtls',
-            save_to_file: true
-          })
-        });
-        const keypairData = await keypairResponse.json().catch(() => ({}));
-        if (!keypairResponse.ok) throw new Error(keypairData.error || 'Không thể sinh keypair');
-        localStorage.setItem(`${TP_PRIVATE_KEY_STORE_PREFIX}${thirdpartyId}`, keypairData.private_key_pem);
-
         const response = await fetch(`${API_URL}/api/storage/register/thirdparty`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ thirdparty_id: thirdpartyId, org_name: orgName, email, contact_person: contactPerson, password, mtls_public_key_pem: keypairData.public_key_pem })
+          body: JSON.stringify({ thirdparty_id: thirdpartyId, org_name: orgName, email, contact_person: contactPerson, password, mtls_public_key_pem: mtlsPublicKeyPem })
         });
         const data = await response.json();
         if (response.ok) {

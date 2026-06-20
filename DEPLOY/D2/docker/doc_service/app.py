@@ -1,11 +1,11 @@
 from flask import Flask, request, jsonify
-import base64, hashlib, logging, os, sys, time, uuid, requests, json, io
+import base64, hashlib, logging, os, sys, time, uuid, requests, json, io, shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from cryptography.x509.oid import ObjectIdentifier
@@ -54,6 +54,15 @@ PKI_SUBJECT_ST = os.environ.get("PKI_SUBJECT_ST", "HCM")
 PKI_SUBJECT_L = os.environ.get("PKI_SUBJECT_L", "Q12")
 PKI_SUBJECT_OU = os.environ.get("PKI_SUBJECT_OU", "CA Q12")
 OPENSSL_CONF_PATH = os.environ.get("OPENSSL_CONF", "/opt/openssl/apps/openssl.cnf")
+BROWSER_CLIENT_CA_DIR = Path(os.environ.get("BROWSER_CLIENT_CA_DIR", "/state/browser_client_ca")).resolve()
+BROWSER_CLIENT_CA_CERT = Path(os.environ.get("BROWSER_CLIENT_CA_CERT", str(BROWSER_CLIENT_CA_DIR / "portal-client-ca.crt"))).resolve()
+BROWSER_CLIENT_CA_KEY = Path(os.environ.get("BROWSER_CLIENT_CA_KEY", str(BROWSER_CLIENT_CA_DIR / "portal-client-ca.key"))).resolve()
+
+ML_DSA_PUBLIC_KEY_OIDS = {
+  bytes.fromhex("0609608648016503040311"),  # ML-DSA-44
+  bytes.fromhex("0609608648016503040312"),  # ML-DSA-65
+  bytes.fromhex("0609608648016503040313"),  # ML-DSA-87
+}
 
 def _build_openssl_env():
   env = os.environ.copy()
@@ -81,19 +90,97 @@ def _run_openssl(args):
   )
 
 
-def _validate_ml_dsa_public_key(public_key_pem):
+def _pem_to_der(pem_text):
+  lines = [
+    line.strip()
+    for line in pem_text.strip().splitlines()
+    if line.strip() and not line.startswith("-----")
+  ]
+  return base64.b64decode("".join(lines), validate=True)
+
+
+def _is_ml_dsa_public_key_pem(public_key_pem):
   try:
-    public_key = load_pem_public_key(public_key_pem.encode('utf-8'))
+    der = _pem_to_der(public_key_pem)
   except Exception:
+    return False
+  return any(oid in der[:64] for oid in ML_DSA_PUBLIC_KEY_OIDS)
+
+
+def _openssl_cert_metadata(cert_pem):
+  with tempfile.TemporaryDirectory() as tmpdir:
+    cert_file = Path(tmpdir) / "cert.pem"
+    cert_file.write_text(cert_pem, encoding="utf-8")
+    result = _run_openssl(["x509", "-in", str(cert_file), "-noout", "-serial", "-subject", "-issuer", "-dates"])
+  lines = result.stdout.decode("utf-8", errors="replace").splitlines()
+  data = {}
+  for line in lines:
+    if "=" in line:
+      key, value = line.split("=", 1)
+      data[key.strip()] = value.strip()
+
+  def parse_openssl_date(value):
+    normalized = " ".join((value or "").split())
+    dt = datetime.strptime(normalized, "%b %d %H:%M:%S %Y GMT")
+    return dt.replace(tzinfo=timezone.utc).isoformat()
+
+  return {
+    "serial": data.get("serial", ""),
+    "subject": data.get("subject", ""),
+    "issuer": data.get("issuer", ""),
+    "not_before": parse_openssl_date(data.get("notBefore", "")),
+    "not_after": parse_openssl_date(data.get("notAfter", "")),
+  }
+
+
+def _cert_uses_ml_dsa(cert_path):
+  try:
+    result = _run_openssl(["x509", "-in", str(cert_path), "-noout", "-text"])
+    text = result.stdout.decode("utf-8", errors="replace")
+    return "Public Key Algorithm: ML-DSA" in text and "Signature Algorithm: ML-DSA" in text
+  except Exception:
+    return False
+
+
+def _ensure_business_ca_files():
+  ensure_state_dirs()
+  ca_key_path = first_existing(PKI_CA_KEY)
+  ca_cert_path = first_existing(PKI_CA_CERT)
+  if ca_key_path and ca_cert_path and _cert_uses_ml_dsa(ca_cert_path):
+    return ca_key_path, ca_cert_path
+
+  timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+  for path in (ca_key_path, ca_cert_path):
+    if path and path.exists():
+      shutil.copy2(path, path.with_suffix(path.suffix + f".backup-{timestamp}"))
+
+  subject = (
+    f"/C={PKI_SUBJECT_C[:2].upper()}"
+    f"/ST={PKI_SUBJECT_ST}"
+    f"/L={PKI_SUBJECT_L}"
+    f"/O={PKI_SUBJECT_O}"
+    f"/OU={PKI_SUBJECT_OU}"
+    "/CN=GovPortal Business Root CA"
+  )
+  PKI_DIR.mkdir(parents=True, exist_ok=True)
+  _run_openssl(["genpkey", "-algorithm", ML_ALG_DSA, "-out", str(PKI_CA_KEY)])
+  _run_openssl([
+    "req", "-new", "-x509",
+    "-key", str(PKI_CA_KEY),
+    "-out", str(PKI_CA_CERT),
+    "-days", "3650",
+    "-subj", subject,
+  ])
+  _run_openssl(["pkey", "-in", str(PKI_CA_KEY), "-pubout", "-out", str(PKI_CA_PUBLIC)])
+  return PKI_CA_KEY, PKI_CA_CERT
+
+
+def _validate_ml_dsa_public_key(public_key_pem):
+  if not public_key_pem or not public_key_pem.strip().startswith("-----BEGIN PUBLIC KEY-----"):
     raise ValueError("Invalid public key PEM")
-
-  key_name = public_key.__class__.__name__.lower()
-  if "rsa" in key_name:
-    raise ValueError("RSA public keys are not supported")
-  if "mldsa" not in key_name and "ml_dsa" not in key_name:
-    raise ValueError("Only ML-DSA public keys are supported")
-
-  return public_key
+  if not _is_ml_dsa_public_key_pem(public_key_pem):
+    raise ValueError("Only ML-DSA public keys are supported for business signing")
+  return True
 
 
 def _validate_ec_public_key(public_key_pem):
@@ -211,53 +298,21 @@ def _save_cert_store(items):
 
 
 def _load_or_create_ca():
-  ca_key_path = first_existing(PKI_CA_KEY)
-  ca_cert_path = first_existing(PKI_CA_CERT)
-  if ca_key_path and ca_cert_path:
-    ca_key = serialization.load_pem_private_key(read_text_file(ca_key_path).encode('utf-8'), password=None)
-    ca_cert = x509.load_pem_x509_certificate(read_text_file(ca_cert_path).encode('utf-8'))
-    return ca_key, ca_cert
+  return _ensure_business_ca_files()
 
-  ca_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-  subject = issuer = x509.Name([
-    x509.NameAttribute(NameOID.COUNTRY_NAME, PKI_SUBJECT_C),
-    x509.NameAttribute(NameOID.ORGANIZATION_NAME, PKI_SUBJECT_O),
-    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, PKI_SUBJECT_ST),
-    x509.NameAttribute(NameOID.LOCALITY_NAME, PKI_SUBJECT_L),
-    x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, PKI_SUBJECT_OU),
-    x509.NameAttribute(NameOID.COMMON_NAME, "OFFICER Root CA"),
-  ])
-  now = datetime.now(timezone.utc)
-  ca_cert = (
-    x509.CertificateBuilder()
-    .subject_name(subject)
-    .issuer_name(issuer)
-    .public_key(ca_key.public_key())
-    .serial_number(x509.random_serial_number())
-    .not_valid_before(now - timedelta(minutes=1))
-    .not_valid_after(now + timedelta(days=3650))
-    .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
-    .sign(private_key=ca_key, algorithm=hashes.SHA256())
-  )
-
-  ensure_state_dirs()
-  _write_text(PKI_CA_KEY, ca_key.private_bytes(
-      encoding=serialization.Encoding.PEM,
-      format=serialization.PrivateFormat.TraditionalOpenSSL,
-      encryption_algorithm=serialization.NoEncryption(),
-    ).decode('utf-8'))
-  _write_text(PKI_CA_CERT, ca_cert.public_bytes(serialization.Encoding.PEM).decode('utf-8'))
-  return ca_key, ca_cert
-
-def _issue_ml_officer_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="CA Q12", officer_id=None, provided_public_key_pem=None):
+def _issue_ml_officer_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="CA Q12", officer_id=None, provided_public_key_pem=None, csr_pem=None):
   """
-  Generate an ML-DSA officer certificate using OpenSSL.
-  If provided_public_key_pem is supplied, use it instead of generating new keys.
+  Issue an ML-DSA business-signing certificate using a client-generated public key.
+  The corresponding private key must stay on the officer's client machine/token.
   """
   if not _openssl_available():
     raise RuntimeError("OpenSSL not available for certificate generation")
-  
-  ca_key, ca_cert = _load_or_create_ca()
+  if not provided_public_key_pem and not csr_pem:
+    raise RuntimeError("ML-DSA business certificate issuance requires a provided CSR or public key")
+
+  if provided_public_key_pem:
+    _validate_ml_dsa_public_key(provided_public_key_pem)
+  ca_key_path, ca_cert_path = _ensure_business_ca_files()
   now = datetime.now(timezone.utc)
   
   with tempfile.TemporaryDirectory() as tmpdir:
@@ -265,90 +320,68 @@ def _issue_ml_officer_cert(common_name, organization, country="VN", state_or_pro
     ml_pub = tmpdir_path / "ml_pub.pem"
     csr_file = tmpdir_path / "officer.csr"
     cert_file = tmpdir_path / "officer.crt"
-    ca_key_file = tmpdir_path / "ca_key.pem"
-    ca_cert_file = tmpdir_path / "ca_cert.pem"
-    serial_file = tmpdir_path / "serial"
-    index_file = tmpdir_path / "index.txt"
-    
-    # Use provided public key or generate new ML-DSA keypair
-    if provided_public_key_pem:
-      _validate_ml_dsa_public_key(provided_public_key_pem)
+    ext_file = tmpdir_path / "cert_ext.cnf"
+    _write_text(str(ext_file), "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\n")
+
+    if csr_pem:
+      _write_text(str(csr_file), csr_pem)
+      pub_result = _run_openssl(["req", "-in", str(csr_file), "-pubkey", "-noout"])
+      ml_pub_pem = pub_result.stdout.decode("utf-8", errors="replace")
+      _validate_ml_dsa_public_key(ml_pub_pem)
+      if provided_public_key_pem and _pem_to_der(ml_pub_pem) != _pem_to_der(provided_public_key_pem):
+        raise RuntimeError("CSR public key does not match provided public_key_pem")
+      sign_args = [
+        "x509", "-req",
+        "-in", str(csr_file),
+        "-CAkey", str(ca_key_path),
+        "-CA", str(ca_cert_path),
+        "-CAcreateserial",
+        "-out", str(cert_file),
+        "-days", "365",
+        "-extfile", str(ext_file),
+      ]
+    else:
       ml_pub_pem = provided_public_key_pem
       _write_text(str(ml_pub), ml_pub_pem)
-    else:
-      ml_priv = tmpdir_path / "ml_priv.pem"
-      # Generate ML-DSA keypair
-      _run_openssl(["genpkey", "-algorithm", ML_ALG_DSA, "-out", str(ml_priv)])
-      _run_openssl(["pkey", "-in", str(ml_priv), "-pubout", "-out", str(ml_pub)])
-      ml_pub_pem = ml_pub.read_text(encoding='utf-8')
-    
-    # Prepare CA files
-    _write_text(str(ca_key_file), _read_text(PKI_CA_KEY))
-    _write_text(str(ca_cert_file), _read_text(PKI_CA_CERT))
-    
-    subj = (
-      f"/C={country[:2].upper()}"
-      f"/ST={state_or_province}"
-      f"/O={organization}"
-      f"/OU={organizational_unit}"
-      f"/CN={common_name}"
-    )
-    
-    # Create certificate request (openssl req -new -key ... -subj ...)
-    # For pre-provided public key, we need to handle differently
-    if not provided_public_key_pem:
-      _run_openssl([
-        "req", "-new",
-        "-key", str(ml_priv),
-        "-out", str(csr_file),
-        "-subj", subj
-      ])
-    else:
-      # For provided public key only, use an ephemeral RSA key to build CSR.
-      # The resulting certificate public key is replaced by -force_pubkey below.
+      subj = (
+        f"/C={country[:2].upper()}"
+        f"/ST={state_or_province}"
+        f"/O={organization}"
+        f"/OU={organizational_unit}"
+        f"/CN={common_name}"
+      )
       temp_key = tmpdir_path / "temp_key.pem"
-      _run_openssl(["genpkey", "-algorithm", "RSA", "-out", str(temp_key)])
-      _run_openssl([
-        "req", "-new",
-        "-key", str(temp_key),
-        "-out", str(csr_file),
-        "-subj", subj
-      ])
+      _run_openssl(["genpkey", "-algorithm", ML_ALG_DSA, "-out", str(temp_key)])
+      _run_openssl(["req", "-new", "-key", str(temp_key), "-out", str(csr_file), "-subj", subj])
+      sign_args = [
+        "x509", "-req",
+        "-in", str(csr_file),
+        "-CAkey", str(ca_key_path),
+        "-CA", str(ca_cert_path),
+        "-CAcreateserial",
+        "-force_pubkey", str(ml_pub),
+        "-out", str(cert_file),
+        "-days", "365",
+        "-extfile", str(ext_file),
+      ]
+
+    _run_openssl(sign_args)
     
-    # Sign CSR with CA certificate
-    _write_text(str(serial_file), "01")
-    _write_text(str(index_file), "")
-    
-    _run_openssl([
-      "x509", "-req",
-      "-in", str(csr_file),
-      "-CAkey", str(ca_key_file),
-      "-CA", str(ca_cert_file),
-      "-CAcreateserial",
-      "-force_pubkey", str(ml_pub),
-      "-out", str(cert_file),
-      "-days", "365",
-      "-sha256"
-    ])
-    
-    # Read generated files
     cert_pem = cert_file.read_text(encoding='utf-8')
     ml_pub_b64 = base64.b64encode(ml_pub_pem.encode('utf-8')).decode('ascii')
-    
-    # Parse certificate to get metadata
-    cert_obj = x509.load_pem_x509_certificate(cert_pem.encode('utf-8'))
+    cert_meta = _openssl_cert_metadata(cert_pem)
     
     cert_id = f"cert-{uuid.uuid4().hex[:12]}"
     item = {
       "cert_id": cert_id,
       "officer_id": officer_id,
       "document_id": None,
-      "purpose": "officer_identity",
-      "serial": format(cert_obj.serial_number, 'X'),
-      "subject": cert_obj.subject.rfc4514_string(),
-      "issuer": cert_obj.issuer.rfc4514_string(),
-      "not_before": cert_obj.not_valid_before_utc.isoformat(),
-      "not_after": cert_obj.not_valid_after_utc.isoformat(),
+      "purpose": "document_signing",
+      "serial": cert_meta["serial"],
+      "subject": cert_meta["subject"],
+      "issuer": cert_meta["issuer"],
+      "not_before": cert_meta["not_before"],
+      "not_after": cert_meta["not_after"],
       "certificate": cert_pem,
       "public_key_pem": ml_pub_pem,
       "ml_public_key_b64": ml_pub_b64,
@@ -362,41 +395,49 @@ def _issue_ml_officer_cert(common_name, organization, country="VN", state_or_pro
 def _issue_ec_mtls_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="GovPortal", subject_id=None, subject_type="identity", provided_public_key_pem=None):
   if not provided_public_key_pem:
     raise RuntimeError("EC mTLS certificate issuance requires a provided public key")
-  public_key = _validate_ec_public_key(provided_public_key_pem)
-  ca_key, ca_cert = _load_or_create_ca()
+  _validate_ec_public_key(provided_public_key_pem)
+  if not BROWSER_CLIENT_CA_KEY.exists() or not BROWSER_CLIENT_CA_CERT.exists():
+    raise RuntimeError("Browser mTLS CA files are not mounted; cannot issue mTLS client certificate")
   now = datetime.now(timezone.utc)
-  subject = x509.Name([
-    x509.NameAttribute(NameOID.COUNTRY_NAME, country[:2].upper()),
-    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, state_or_province),
-    x509.NameAttribute(NameOID.LOCALITY_NAME, locality),
-    x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization),
-    x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, organizational_unit),
-    x509.NameAttribute(NameOID.COMMON_NAME, common_name),
-  ])
-  cert_obj = (
-    x509.CertificateBuilder()
-    .subject_name(subject)
-    .issuer_name(ca_cert.subject)
-    .public_key(public_key)
-    .serial_number(x509.random_serial_number())
-    .not_valid_before(now - timedelta(minutes=1))
-    .not_valid_after(now + timedelta(days=365))
-    .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-    .add_extension(x509.KeyUsage(
-      digital_signature=True,
-      content_commitment=False,
-      key_encipherment=False,
-      data_encipherment=False,
-      key_agreement=False,
-      key_cert_sign=False,
-      crl_sign=False,
-      encipher_only=False,
-      decipher_only=False,
-    ), critical=True)
-    .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
-    .sign(private_key=ca_key, algorithm=hashes.SHA256())
-  )
-  cert_pem = cert_obj.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+
+  with tempfile.TemporaryDirectory() as tmpdir:
+    tmpdir_path = Path(tmpdir)
+    public_key_file = tmpdir_path / "client.pub.pem"
+    temp_key_file = tmpdir_path / "csr.key.pem"
+    csr_file = tmpdir_path / "client.csr"
+    cert_file = tmpdir_path / "client.crt.pem"
+    ext_file = tmpdir_path / "client_ext.cnf"
+    public_key_file.write_text(provided_public_key_pem, encoding="utf-8")
+    ext_file.write_text(
+      "basicConstraints=CA:FALSE\n"
+      "keyUsage=digitalSignature\n"
+      "extendedKeyUsage=clientAuth\n",
+      encoding="utf-8",
+    )
+    subj = (
+      f"/C={country[:2].upper()}"
+      f"/ST={state_or_province}"
+      f"/L={locality}"
+      f"/O={organization}"
+      f"/OU={organizational_unit}"
+      f"/CN={common_name}"
+    )
+    _run_openssl(["genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:secp384r1", "-out", str(temp_key_file)])
+    _run_openssl(["req", "-new", "-key", str(temp_key_file), "-out", str(csr_file), "-subj", subj])
+    _run_openssl([
+      "x509", "-req",
+      "-in", str(csr_file),
+      "-CAkey", str(BROWSER_CLIENT_CA_KEY),
+      "-CA", str(BROWSER_CLIENT_CA_CERT),
+      "-CAcreateserial",
+      "-force_pubkey", str(public_key_file),
+      "-out", str(cert_file),
+      "-days", "825",
+      "-extfile", str(ext_file),
+    ])
+    cert_pem = cert_file.read_text(encoding="utf-8")
+    cert_meta = _openssl_cert_metadata(cert_pem)
+
   cert_id = f"cert-{uuid.uuid4().hex[:12]}"
   return {
     "cert_id": cert_id,
@@ -405,17 +446,17 @@ def _issue_ec_mtls_cert(common_name, organization, country="VN", state_or_provin
     "subject_type": subject_type,
     "document_id": None,
     "purpose": "mtls_client",
-    "serial": format(cert_obj.serial_number, 'X'),
-    "subject": cert_obj.subject.rfc4514_string(),
-    "issuer": cert_obj.issuer.rfc4514_string(),
-    "not_before": cert_obj.not_valid_before_utc.isoformat(),
-    "not_after": cert_obj.not_valid_after_utc.isoformat(),
+    "serial": cert_meta["serial"],
+    "subject": cert_meta["subject"],
+    "issuer": cert_meta["issuer"],
+    "not_before": cert_meta["not_before"],
+    "not_after": cert_meta["not_after"],
     "certificate": cert_pem,
     "public_key_pem": provided_public_key_pem,
     "created_at": now.isoformat(),
   }
 
-def _issue_identity_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="CA Q12", officer_id=None, document_id=None, purpose="officer_identity", provided_public_key_pem=None, subject_type="identity"):
+def _issue_identity_cert(common_name, organization, country="VN", state_or_province="HCM", locality="Q12", organizational_unit="CA Q12", officer_id=None, document_id=None, purpose="officer_identity", provided_public_key_pem=None, subject_type="identity", csr_pem=None):
   if purpose == "mtls_client":
     return _issue_ec_mtls_cert(
       common_name=common_name,
@@ -438,7 +479,8 @@ def _issue_identity_cert(common_name, organization, country="VN", state_or_provi
       locality=locality,
       organizational_unit=organizational_unit,
       officer_id=officer_id,
-      provided_public_key_pem=provided_public_key_pem
+      provided_public_key_pem=provided_public_key_pem,
+      csr_pem=csr_pem,
     )
   return _issue_ml_officer_cert(
     common_name=common_name,
@@ -449,6 +491,7 @@ def _issue_identity_cert(common_name, organization, country="VN", state_or_provi
     organizational_unit=organizational_unit,
     officer_id=officer_id,
     provided_public_key_pem=provided_public_key_pem,
+    csr_pem=csr_pem,
   )
 
 
@@ -510,10 +553,9 @@ def load_or_create_ml_keys():
 def sign_with_ml(message_bytes, private_key_pem=None):
   if not _openssl_available():
     raise RuntimeError("OpenSSL binary not available for ML-DSA signing")
-  if private_key_pem:
-    sk = private_key_pem.encode('utf-8') if isinstance(private_key_pem, str) else private_key_pem
-  else:
-    _, sk = load_or_create_ml_keys()
+  if not private_key_pem:
+    raise RuntimeError("Server-side document signing is disabled; private key must stay on the client")
+  sk = private_key_pem.encode('utf-8') if isinstance(private_key_pem, str) else private_key_pem
   with tempfile.TemporaryDirectory() as tmpdir:
     tmpdir_path = Path(tmpdir)
     priv_path = tmpdir_path / "ml_priv.pem"
@@ -539,7 +581,7 @@ def verify_with_ml(message_bytes, signature_b64, public_key_b64=None):
   if public_key_b64:
     pub_pem = base64.b64decode(public_key_b64)
   else:
-    pub_pem, _ = load_or_create_ml_keys()
+    raise RuntimeError("ML-DSA verification requires the signer's public key")
   with tempfile.TemporaryDirectory() as tmpdir:
     tmpdir_path = Path(tmpdir)
     pub_path = tmpdir_path / "ml_pub.pem"
@@ -595,20 +637,17 @@ def _generate_qr_code(officer_id, doc_id, signature, doc_hash):
 def _verify_certificate_chain(cert_pem_to_verify):
     """Verifies a PEM certificate against the service's root CA."""
     try:
-        _, ca_cert = _load_or_create_ca()
+        _, ca_cert_path = _ensure_business_ca_files()
         
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            ca_cert_file = tmpdir_path / "ca.pem"
             cert_to_verify_file = tmpdir_path / "cert.pem"
             
-            ca_cert_file.write_text(ca_cert.public_bytes(serialization.Encoding.PEM).decode('utf-8'))
             cert_to_verify_file.write_text(cert_pem_to_verify)
             
-            # Use openssl to verify the chain
             _run_openssl([
                 "verify",
-                "-CAfile", str(ca_cert_file),
+                "-CAfile", str(ca_cert_path),
                 str(cert_to_verify_file)
             ])
         return True
@@ -618,86 +657,11 @@ def _verify_certificate_chain(cert_pem_to_verify):
 
 @app.route("/api/documents/sign", methods=["POST"])
 def sign_document():
-  try:
-    data = request.get_json()
-    citizen_id = data.get("citizen_id")
-    officer_id = data.get("officer_id")
-    private_key_pem = data.get("private_key_pem")
-    if not citizen_id or not officer_id:
-      return jsonify({"error": "citizen_id and officer_id required"}), 400
-    if not private_key_pem:
-      return jsonify({
-        "error": "private_key_pem is not accepted from citizen submission",
-        "message": "Citizen uploads must create a pending request. Officer signing must happen locally in the officer portal using the officer's own private key.",
-      }), 400
+  return jsonify({
+    "error": "server_side_signing_disabled",
+    "message": "Application-server signing is disabled. Business signatures must be produced on the trusted device and uploaded as detached signatures.",
+  }), 410
 
-    doc_b64 = data["document_base64"]
-    doc_id = data.get("doc_id", str(uuid.uuid4()))
-    doc_type = data.get("doc_type", "official_document")
-    doc_title = data.get("doc_title", "GovPortal Document")
-    request_id = data.get("request_id")
-    doc_bytes = base64.b64decode(doc_b64)
-    doc_hash = hashlib.sha256(doc_bytes).hexdigest()
-
-    if not ML_ENABLED or not _openssl_available():
-      return jsonify({"error": "ML-DSA signing is unavailable"}), 500
-
-    signature = sign_with_ml(doc_bytes, private_key_pem=private_key_pem)
-    signature_algorithm = 'ML-DSA'
-    key_version = 1
-
-    archive_payload = {
-      "doc_id": doc_id,
-      "citizen_id": citizen_id,
-      "doc_type": doc_type,
-      "doc_title": doc_title,
-      "content_hash": doc_hash,
-      "signature_data": signature,
-      "signature_algorithm": signature_algorithm,
-      "officer_id": officer_id,
-      "created_by": citizen_id,
-      "signed_by": officer_id,
-      "metadata": {
-        "key_version": key_version,
-        "signed_at": datetime.now(timezone.utc).isoformat(),
-        "request_id": request_id,
-      },
-      "status": "signed",
-    }
-
-    archive_resp = archive_document(archive_payload)
-
-    archive_json = {}
-    try:
-      archive_json = archive_resp.json()
-    except Exception:
-      archive_json = {"body": str(archive_resp.text) if archive_resp is not None else None}
-
-    log_event("document_signed", {
-      "doc_id": doc_id,
-      "key_version": key_version,
-      "request_id": request_id,
-    })
-
-    # Generate QR code
-    qr_image_b64 = None
-    qr_image_b64 = _generate_qr_code(officer_id, doc_id, signature, doc_hash)
-
-    return jsonify({
-      "doc_id": doc_id,
-      "request_id": request_id,
-      "doc_hash_sha256": doc_hash,
-      "signature": signature,
-      "qr_image_base64": qr_image_b64,
-      "key_version": key_version,
-      "archived": archive_resp.status_code in (200, 201) if archive_resp is not None else False,
-      "archive_status": archive_resp.status_code if archive_resp is not None else None,
-      "archive_response": archive_json,
-      "signed_at": time.time()
-    }), 201
-  except Exception as e:
-    logger.error(f"Document signing failed: {e}")
-    return jsonify({"error": "Document signing failed"}), 500
 
 @app.route("/api/documents/verify", methods=["POST"])
 def verify_document():
@@ -848,19 +812,10 @@ def ca_certificate():
 @app.route("/api/pki/public-key", methods=["GET"])
 def public_key():
   try:
-    # Return PEM-formatted public key when possible (PKI style). The state
-    # file may contain `pub_pem` (preferred) or legacy base64 `pub_b64`.
-    pub = read_public_key_from_state()
-    if not pub and os.path.exists(ML_PUB):
-      with open(ML_PUB, 'rb') as f:
-        raw = f.read()
-      pub = "-----BEGIN ML-DSA PUBLIC KEY-----\n" + base64.b64encode(raw).decode('ascii') + "\n-----END ML-DSA PUBLIC KEY-----"
-    if not pub:
-      return jsonify({"error": "public key not available"}), 500
-    # If pub looks like base64 raw (legacy), wrap as PEM
-    if not pub.strip().startswith("-----BEGIN"):
-      pub = "-----BEGIN ML-DSA PUBLIC KEY-----\n" + pub + "\n-----END ML-DSA PUBLIC KEY-----"
-    return app.response_class(pub, mimetype='text/plain'), 200
+    _ensure_business_ca_files()
+    if not PKI_CA_PUBLIC.exists():
+      _run_openssl(["pkey", "-in", str(PKI_CA_KEY), "-pubout", "-out", str(PKI_CA_PUBLIC)])
+    return app.response_class(PKI_CA_PUBLIC.read_text(encoding="utf-8"), mimetype='text/plain'), 200
   except Exception as e:
     logger.error(f"Public key lookup failed: {e}")
     return jsonify({"error": "public key lookup failed"}), 500
@@ -884,6 +839,7 @@ def issue_certificate():
     cert_profile = (data.get("cert_profile") or "").strip()
     purpose = "mtls_client" if cert_profile == "mtls_client" else f"{subject_type}_identity"
     public_key_pem = (data.get("public_key_pem") or "").strip() or None
+    csr_pem = (data.get("csr_pem") or data.get("csr") or "").strip() or None
     allow_reissue = bool(data.get("allow_reissue", False))
     
     if not common_name:
@@ -896,10 +852,12 @@ def issue_certificate():
           _validate_ml_dsa_public_key(public_key_pem)
       except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    elif csr_pem and purpose != "mtls_client":
+      public_key_pem = None
     elif subject_type == "officer" and officer_id:
       public_key_pem = _load_current_officer_public_key_from_storage(officer_id)
     else:
-      return jsonify({"error": "public_key_pem or officer_id is required"}), 400
+      return jsonify({"error": "csr_pem, public_key_pem, or officer_id is required"}), 400
 
     # Check 1-certificate-per-officer constraint for officer certificates
     if subject_type == "officer" and officer_id and not allow_reissue:
@@ -923,6 +881,7 @@ def issue_certificate():
       purpose=purpose,
       provided_public_key_pem=public_key_pem,
       subject_type=subject_type,
+      csr_pem=csr_pem,
     )
     records = _load_cert_store()
     records.insert(0, item)
@@ -1072,14 +1031,4 @@ if __name__ == "__main__":
     _load_or_create_ca()
   except Exception as e:
     logger.warning(f"Failed to initialize local PKI CA: {e}")
-  # Ensure ML keypair exists at startup and persist its public key to state file.
-  try:
-    if ML_ENABLED and _openssl_available():
-      try:
-        pk, _ = load_or_create_ml_keys()
-        publish_public_key_to_state(base64.b64encode(pk).decode('ascii'))
-      except Exception as e:
-        logger.warning(f"Failed to create/load ML keys at startup: {e}")
-  except Exception:
-    pass
   app.run(host="0.0.0.0", port=5000, debug=False)

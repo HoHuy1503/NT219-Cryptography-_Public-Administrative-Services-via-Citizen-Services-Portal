@@ -41,12 +41,12 @@ Citizen la portal public khong bat browser client cert. Bon portal con lai bat b
               +--------------------------------------------------+
                     |             |              |
                     |             |              |
-       static HTML  |             | /api/        | helper routes
+       static HTML  |             | /api/        |
        portals      |             v              v
                     |     +----------------+  +--------------------------+
                     |     | Docker gateway |  | portals container         |
                     |     | 127.0.0.1:8080 |  | 127.0.0.1:3000-3004      |
-                    |     | Nginx API GW   |  | __keypair / __sign helper |
+                    |     | Nginx API GW   |  | static portal files       |
                     |     +----------------+  +--------------------------+
                     |             |
                     |             | auth_request
@@ -66,8 +66,8 @@ Citizen la portal public khong bat browser client cert. Bon portal con lai bat b
                     v
           +------------------+       +------------------+       +----------------+
           | storage_service  |       | doc_service      |       | qr_service     |
-          | users/documents  |       | PKI/CA, certs    |       | QR verify      |
-          | requests/audit   |       | document verify  |       | token format   |
+          | users/documents  |       | PKI CA, certs    |       | QR verify      |
+          | requests/audit   |       | signature verify |       | token format   |
           +------------------+       +------------------+       +----------------+
                     |
                     v
@@ -75,6 +75,15 @@ Citizen la portal public khong bat browser client cert. Bon portal con lai bat b
               | postgres   |
               | docdb      |
               +------------+
+
+          +------------------+
+          | Encrypted key    |
+          | vault metadata   |
+          +------------------+
+                    ^
+                    |
+          trusted device downloads
+          encrypted blob only
 ```
 
 ## 3. Public network flow
@@ -90,14 +99,256 @@ Browser
   -> postgres if data is needed
 ```
 
+## 3.1 Business signing with encrypted key vault
+
+```text
+Officer browser
+  -> mTLS login with EC client cert from USB/browser token
+  -> downloads document to trusted device
+  -> downloads encrypted ML-DSA key blob only
+  -> trusted device derives decrypt key from password + PBKDF2
+  -> trusted device decrypts local temporary key and signs document
+  -> officer uploads detached signature base64
+  -> storage_service verifies signature with stored public key
+  -> storage_service stores signature, QR metadata, and audit
+```
+
+This is not a non-exportable hardware HSM model. It is an encrypted key-vault model:
+
+- Server stores only encrypted private-key blob, public key, KDF params, cert metadata, signatures, and audit.
+- Plaintext ML-DSA private key must never be uploaded to the app server.
+- Officer client creates ML-DSA key and CSR locally, uploads CSR + encrypted private-key blob.
+- PKI server signs the CSR with the server-side ML-DSA CA private key after pki-admin approval.
+- `.p12` packages are only for browser mTLS access, not document signing.
+- Trusted device is responsible for decrypting and signing locally.
+
+## 3.2 Detailed business flows
+
+### 3.2.1 Citizen submits a document signing request
+
+```text
+Citizen browser
+  |
+  | 1. Login bang account + OTP
+  v
+Citizen portal
+  |
+  | 2. POST /api/storage/document-sign-requests
+  |    Body gom: citizen_id, officer_id, document metadata,
+  |    document_base64/content_hash
+  v
+Host Nginx
+  |
+  | 3. Proxy /api/* vao Docker gateway
+  v
+Docker gateway
+  |
+  | 4. Kiem tra route/JWT/OPA neu can
+  | 5. Goi storage_service bang internal mTLS
+  v
+storage_service
+  |
+  | 6. Validate citizen, officer, document
+  | 7. Luu document metadata/content/hash vao DB
+  | 8. Tao document_sign_requests.status = pending
+  | 9. Ghi audit
+  v
+postgres
+  |
+  | 10. Tra request_id ve citizen
+  v
+Citizen portal
+```
+
+Ket qua DB:
+
+```text
+documents.doc_id
+documents.content_hash
+document_sign_requests.request_id
+document_sign_requests.citizen_id
+document_sign_requests.officer_id
+document_sign_requests.status = pending
+document_sign_requests.document_base64
+audit_log
+```
+
+### 3.2.2 Officer signs the citizen request
+
+```text
+Officer browser
+  |
+  | 1. Truy cap officers.hnh2511.xyz
+  | 2. Browser xuat trinh EC mTLS cert tu USB/browser token
+  v
+Host Nginx
+  |
+  | 3. Verify client cert bang browser-client CA
+  | 4. Chi cho vao neu CN khop officers domain
+  v
+Officer portal
+  |
+  | 5. Login app bang username/password
+  | 6. Backend bind account voi TLS client cert subject
+  | 7. GET /api/storage/document-sign-requests?status=pending
+  v
+storage_service
+  |
+  | 8. Load pending requests cua officer
+  | 9. Tra danh sach ho so can ky
+  v
+Officer portal
+  |
+  | 10. Officer tai document ve trusted device
+  | 11. Officer tai encrypted signing key blob
+  |     GET /api/storage/officers/<officer_id>/encrypted-signing-key/current
+  v
+Trusted device
+  |
+  | 12. Nhap password
+  | 13. PBKDF2 derive decrypt key
+  | 14. Giai ma encrypted_private_key_blob thanh ML-DSA key tam
+  | 15. Ky document bang ML-DSA
+  | 16. Xoa key tam
+  | 17. Xuat detached signature base64
+  v
+Officer portal
+  |
+  | 18. POST /api/storage/document-sign-requests/<request_id>/complete
+  |     Body chi gom detached signature base64
+  v
+storage_service
+  |
+  | 19. Load active signing cert + public key cua officer
+  | 20. Goi doc_service verify signature bang internal mTLS
+  v
+doc_service
+  |
+  | 21. Verify ML-DSA signature voi public key officer
+  v
+storage_service
+  |
+  | 22. Neu hop le: luu signature, tao PKCS7-like envelope
+  | 23. Cap nhat document_sign_requests.status = signed
+  | 24. Cap nhat documents.status = signed
+  | 25. Tao QR payload GVP1.<qr_id>.<random_token>
+  | 26. Luu token_hash, sig_hash, content_hash, metadata
+  | 27. Ghi audit
+  v
+postgres
+```
+
+Server khong nhan:
+
+```text
+private_key_pem
+cert_pem tu client
+password giai ma key
+plaintext ML-DSA private key
+```
+
+Server chi nhan:
+
+```text
+detached signature base64
+request_id
+session/JWT
+TLS client cert subject do Nginx forward
+```
+
+### 3.2.3 Officer requests a business signing certificate
+
+```text
+Trusted device cua officer
+  |
+  | 1. Sinh ML-DSA private key
+  | 2. Tao business_signing.csr.pem
+  | 3. Tao business_signing_public.pem
+  | 4. Ma hoa private key:
+  |    password + PBKDF2 -> AES encrypted blob
+  v
+Officer portal
+  |
+  | 5. POST /api/storage/officers/<officer_id>/register-key
+  |    Gui: csr_pem, public_key_pem,
+  |    encrypted_private_key_blob, kdf_params
+  v
+storage_service
+  |
+  | 6. Validate officer dang login dung account/cert
+  | 7. Validate public key ML-DSA
+  | 8. Luu encrypted blob vao officer_keys, is_current = FALSE
+  | 9. Luu CSR vao identity_cert_requests, status = PENDING
+  v
+postgres
+  |
+  | 10. PKI admin thay request trong pki portal
+  v
+PKI portal
+  |
+  | 11. PKI admin dang nhap bang EC mTLS cert pki-admin
+  | 12. Bam approve request
+  v
+storage_service
+  |
+  | 13. Goi doc_service /api/pki/issue-certificate
+  |     Gui CSR + subject metadata
+  v
+doc_service
+  |
+  | 14. Lay ML-DSA CA private key tren server
+  | 15. Kiem tra public key trong CSR khop public_key_pem
+  | 16. Ky CSR thanh signing cert
+  v
+storage_service
+  |
+  | 17. Luu cert vao identity_certificates
+  | 18. Danh dau officer_keys.is_current = TRUE
+  | 19. Cap nhat request = ISSUED
+  | 20. Ghi audit
+  v
+postgres
+```
+
+### 3.2.4 Third party verifies a QR
+
+```text
+Thirdparty browser
+  |
+  | 1. Truy cap thirdparties.hnh2511.xyz
+  | 2. Browser xuat trinh EC mTLS cert thirdparty
+  v
+Thirdparty portal
+  |
+  | 3. Quet QR: GVP1.<qr_id>.<random_token>
+  | 4. POST /api/storage/verify-document-qr
+  v
+storage_service
+  |
+  | 5. Parse qr_id va random_token
+  | 6. Hash random_token
+  | 7. Lookup document_qr theo qr_id + token_hash
+  | 8. Load document/signature/public key/cert metadata
+  | 9. Verify content_hash va sig_hash
+  | 10. Goi doc_service verify ML-DSA signature neu can
+  v
+doc_service
+  |
+  | 11. Verify signature bang public key officer
+  v
+storage_service
+  |
+  | 12. Tra ket qua hop le/khong hop le
+  | 13. Tang accessed_count va ghi audit
+```
+
 Important public paths:
 
 | Path | Xu ly boi |
 | --- | --- |
 | `/` | Host Nginx serve portal HTML |
 | `/api/*` | Host Nginx proxy to Docker gateway |
-| `/__keypair` | Host Nginx proxy to portals helper for officer/thirdparty |
-| `/__sign` | Host Nginx proxy to portals helper for officer |
+| `/__keypair`, `/__local-key`, `/__sign` | Disabled on public deploy; private-key operations do not happen in portal helper |
 
 ## 4. Repo inventory
 
@@ -127,7 +378,7 @@ Important public paths:
 | `docker/storage_service/app.py` | API chinh: login, users, documents, requests, QR metadata, cert request metadata, audit |
 | `docker/storage_service/jwt_auth.py` | Tao/verify JWT va JWKS |
 | `docker/storage_service/nginx-internal.conf` | Nginx noi bo cua storage service, bat mTLS |
-| `docker/doc_service/app.py` | PKI/CA, cap cert, verify chu ky/tai lieu |
+| `docker/doc_service/app.py` | PKI CA, cap cert, verify chu ky/tai lieu |
 | `docker/doc_service/nginx-internal.conf` | Nginx noi bo cua doc service, bat mTLS |
 | `docker/qr_service/app.py` | Xu ly QR verify noi bo |
 | `docker/qr_service/nginx-internal.conf` | Nginx noi bo cua QR service, bat mTLS |
@@ -147,18 +398,16 @@ Important public paths:
 | `portals/officer.html` | Giao dien officer |
 | `portals/portal-api.js` | Helper frontend de goi API theo same-origin/public-local mode |
 | `portals/shared-portal.css` | CSS dung chung |
-| `portals/start_portals.py` | Static file server va helper local `__keypair`, `__sign` |
+| `portals/start_portals.py` | Static file server. Private-key helper endpoints bi tat |
 
 ### 4.5 Scripts
 
 | Script | Chuc nang |
 | --- | --- |
-| `scripts/generate_mtls_certs.sh` | Tao cert mTLS noi bo cho gateway/services |
-| `scripts/generate_mldsa_mtls_certs.ps1/sh` | Script thu nghiem tao cert noi bo bang OpenSSL moi |
-| `scripts/generate_portal_client_certs.ps1/sh` | Tao browser client cert demo cho pki/officer/thirdparty/storage_admin |
-| `scripts/request_letsencrypt_5domains.ps1` | Xin cert Let's Encrypt cho 5 domain bang Certbot/Docker |
-| `scripts/request_letsencrypt_wildcard.ps1` | Xin wildcard cert Let's Encrypt bang DNS challenge |
 | `scripts/sync_server_certs.ps1` | Dong bo cert/key quan trong tu Azure VM ve `domain_key/` local |
+| `scripts/generate_initial_p12.ps1` | Tao p12 mTLS ban dau cho officer/thirdparty tu CA browser-client |
+| `scripts/generate_client_key_material.ps1` | Tao key EC mTLS cho USB/browser token |
+| `scripts/sign_document_local.ps1` | Ky tai lieu tren trusted device tu encrypted ML-DSA key blob |
 
 ## 5. Docker Compose
 
@@ -176,10 +425,10 @@ Services:
 | `opa` | Policy engine |
 | `authz_proxy` | Bridge giua gateway va OPA |
 | `storage_service` | API nghiep vu va database access |
-| `doc_service` | PKI/CA va verify tai lieu |
+| `doc_service` | PKI CA, cap cert, verify chu ky tai lieu |
 | `qr_service` | QR service noi bo |
 | `gateway` | Nginx API gateway |
-| `portals` | Static portal server va helper local |
+| `portals` | Static portal server |
 
 Networks:
 
@@ -191,7 +440,7 @@ Networks:
 Public exposure:
 
 ```text
-127.0.0.1:3000-3004 -> portals/helper
+127.0.0.1:3000-3004 -> static portals
 127.0.0.1:8080      -> Docker gateway HTTP
 127.0.0.1:8443      -> Docker gateway HTTPS internal
 ```
@@ -221,7 +470,7 @@ Chuc nang:
   - `officers` chi nhan cert officer co subject gan voi tung `officer_id`.
 - Backend login tiep tuc kiem tra subject cert khop account dang dang nhap. Vi du `officer_demo` phai dung cert co `CN=officer_demo@officers.hnh2511.xyz`; cert cua officer khac khong dang nhap duoc vao account nay.
 - Proxy `/api/` ve `http://127.0.0.1:8080`.
-- Proxy helper route cho officer/thirdparty khi can tao key hoac ky.
+- Khong proxy helper tao key/ky tai lieu; tao key va ky tai lieu thuc hien o client.
 
 Trust bundle cho browser client cert:
 
@@ -393,9 +642,25 @@ DB chi luu public key va metadata:
 ```text
 officer_keys.public_key_pem
 officer_keys.key_version
+officer_keys.encrypted_private_key_blob
+officer_keys.encrypted_private_key_format
+officer_keys.kdf_params
+officer_keys.key_storage_mode
 ```
 
-Private key khong nen luu DB. Trong demo helper co the giu local; trien khai that nen nam trong USB token/HSM.
+DB chi luu private key o dang da ma hoa. Password khong luu DB. Khi ky, trusted device tai blob ma hoa, dung password + PBKDF2 de giai ma cuc bo, ky tai lieu, xoa key tam, roi upload detached signature base64. `.p12` hien tai la goi mTLS de trinh duyet xuat trinh khi vao portal, khong phai key ky tai lieu. Key EC mTLS nam tren USB/browser token theo luong cu.
+
+CSR luong cap cert signing:
+
+```text
+trusted device sinh ML-DSA key
+  -> tao business_signing.csr.pem
+  -> ma hoa private key thanh business_signing_private.pem.enc.b64
+  -> POST CSR + encrypted blob len storage
+  -> PKI admin duyet
+  -> doc_service dung ML-DSA CA private key tren server de ky CSR
+  -> storage luu cert va danh dau key current
+```
 
 ## 11. Certbot role
 
@@ -428,7 +693,7 @@ Certbot lam:
 | `document_verify_requests` | Yeu cau cong dan gui thirdparty xac thuc |
 | `identity_cert_requests` | Yeu cau cap cert truy cap |
 | `identity_certificates` | Cert da cap, chi cho tai mot lan |
-| `officer_keys` | Public key ky nghiep vu cua officer |
+| `officer_keys` | Public key ky nghiep vu, encrypted key blob, KDF metadata |
 | `audit_log` | Lich su hanh dong |
 
 ## 13. QR topology
@@ -462,6 +727,6 @@ Ly do QR chi chua id + random token:
 - 4 private portals bi chan bang browser client cert truoc khi vao app.
 - API protected phai qua JWT va OPA.
 - Gateway goi service bang mTLS.
-- Private key khong dua vao frontend.
+- Private key plaintext khong dua vao frontend/app server; trusted device chi upload detached signature.
 - CA private key va domain private key khong nen commit len git.
-- USB token/HSM nen giu private key trong trien khai that.
+- USB token giu key EC mTLS. Key ML-DSA nghiep vu trong repo nay la encrypted key-vault model; neu can non-exportable that thi dung HSM/PKCS#11 chuyen dung.

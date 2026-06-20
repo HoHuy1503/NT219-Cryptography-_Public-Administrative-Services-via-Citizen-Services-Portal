@@ -295,6 +295,11 @@ DOC_SERVICE_URL = os.getenv("DOC_SERVICE_URL", "http://doc_service:5000")
 LOCAL_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true"
 SCHEMA_READY = False
 ALLOWED_OFFICER_KEY_ALGORITHMS = {"ML-DSA", "ML-DSA-44"}
+ML_DSA_PUBLIC_KEY_OIDS = {
+    bytes.fromhex("0609608648016503040311"),  # ML-DSA-44
+    bytes.fromhex("0609608648016503040312"),  # ML-DSA-65
+    bytes.fromhex("0609608648016503040313"),  # ML-DSA-87
+}
 
 
 # Vault client logic removed. Vault is not used in this deployment.
@@ -626,10 +631,18 @@ def ensure_schema():
                 expires_at TIMESTAMPTZ,
                 rotated_at TIMESTAMPTZ,
                 auto_rotate_at TIMESTAMPTZ,
-                key_version INTEGER NOT NULL DEFAULT 1
+                key_version INTEGER NOT NULL DEFAULT 1,
+                encrypted_private_key_blob TEXT,
+                encrypted_private_key_format TEXT,
+                kdf_params JSONB,
+                key_storage_mode TEXT NOT NULL DEFAULT 'encrypted_vault'
             )
             """
         )
+        cur.execute("ALTER TABLE officer_keys ADD COLUMN IF NOT EXISTS encrypted_private_key_blob TEXT")
+        cur.execute("ALTER TABLE officer_keys ADD COLUMN IF NOT EXISTS encrypted_private_key_format TEXT")
+        cur.execute("ALTER TABLE officer_keys ADD COLUMN IF NOT EXISTS kdf_params JSONB")
+        cur.execute("ALTER TABLE officer_keys ADD COLUMN IF NOT EXISTS key_storage_mode TEXT NOT NULL DEFAULT 'encrypted_vault'")
         cur.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_officer_keys_one_current
@@ -734,6 +747,7 @@ def ensure_schema():
                 subject_type TEXT NOT NULL,
                 subject_id TEXT NOT NULL,
                 public_key_pem TEXT NOT NULL,
+                csr_pem TEXT,
                 key_algorithm TEXT,
                 cert_profile TEXT NOT NULL DEFAULT 'mtls_client',
                 common_name TEXT,
@@ -751,6 +765,7 @@ def ensure_schema():
             )
             """
         )
+        cur.execute("ALTER TABLE identity_cert_requests ADD COLUMN IF NOT EXISTS csr_pem TEXT")
         cur.execute("ALTER TABLE identity_cert_requests ADD COLUMN IF NOT EXISTS key_algorithm TEXT")
         cur.execute("ALTER TABLE identity_cert_requests ADD COLUMN IF NOT EXISTS cert_profile TEXT NOT NULL DEFAULT 'mtls_client'")
         cur.execute(
@@ -872,6 +887,22 @@ def ensure_schema():
 
 
 def _validate_ml_dsa_public_key(public_key_pem: str):
+    try:
+        lines = [
+            line.strip()
+            for line in public_key_pem.strip().splitlines()
+            if line.strip() and not line.startswith("-----")
+        ]
+        der = base64.b64decode("".join(lines), validate=True)
+    except Exception:
+        return False, "Invalid public key PEM"
+
+    if any(oid in der[:64] for oid in ML_DSA_PUBLIC_KEY_OIDS):
+        return True, None
+    return False, "Only ML-DSA public keys are supported for business signing"
+
+
+def _validate_ml_dsa_public_key_legacy(public_key_pem: str):
     try:
         public_key = load_pem_public_key(public_key_pem.encode("utf-8"))
     except Exception:
@@ -1591,6 +1622,18 @@ def get_document_sign_request(request_id):
 @require_auth
 def complete_document_sign_request(request_id):
     data = request.get_json(silent=True) or {}
+    if data.get("private_key_pem") or data.get("privateKeyPem") or data.get("cert_pem"):
+        return jsonify({
+            "error": "private_key_material_not_allowed",
+            "message": "Private keys and client-supplied certificates are not accepted. Sign on the trusted device and upload only the detached signature.",
+        }), 400
+    signature_b64 = (data.get("signature") or data.get("signature_data") or "").strip()
+    if not signature_b64:
+        return jsonify({
+            "error": "missing_signature",
+            "message": "Upload the detached signature produced on the trusted device.",
+        }), 400
+
     # Force the signer to be the authenticated officer when called by an officer.
     # Allow storage_admin to optionally supply a different signer in the body.
     if g.current_user_type == "officer":
@@ -1605,7 +1648,7 @@ def complete_document_sign_request(request_id):
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        # Block officer signing when the officer has no active, non-expired certificate.
+        # Block officer signing when the officer has no active business-signing certificate.
         if g.current_user_type == "officer":
             cur.execute(
                 """
@@ -1615,6 +1658,7 @@ def complete_document_sign_request(request_id):
                   AND subject_id = %s
                   AND is_active = TRUE
                   AND expires_at > NOW()
+                  AND metadata->>'cert_profile' = 'signing'
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
@@ -1622,7 +1666,7 @@ def complete_document_sign_request(request_id):
             )
             active_cert = cur.fetchone()
             if not active_cert:
-                return jsonify({"error": "Officer has no active certificate. Signing is blocked."}), 403
+                return jsonify({"error": "Officer has no active business signing certificate. Signing is blocked."}), 403
 
         cur.execute("SELECT request_id, citizen_id, officer_id, status, doc_id, content_hash FROM document_sign_requests WHERE request_id = %s", (request_id,))
         row = cur.fetchone()
@@ -1631,13 +1675,35 @@ def complete_document_sign_request(request_id):
         if row["status"] == "signed":
             return jsonify({"request_id": request_id, "status": "signed"}), 200
 
-        # Persist signature if provided
-        signature_b64 = data.get("signature") or data.get("signature_data")
-        signature_algorithm = data.get("signature_algorithm") or data.get("signatureAlgorithm") or "ML-DSA"
-        key_version = int(data.get("key_version") or data.get("keyVersion") or 1)
+        signature_algorithm = "ML-DSA"
         signed_at_iso = datetime.now(timezone.utc).isoformat()
-        private_key_pem = data.get("private_key_pem")
-        cert_pem_from_client = data.get("cert_pem")
+
+        requested_key_version = data.get("key_version") or data.get("keyVersion")
+        if requested_key_version:
+            key_version = int(requested_key_version)
+            cur.execute(
+                """
+                SELECT key_id, public_key_pem, key_version, key_storage_mode
+                FROM officer_keys
+                WHERE officer_id = %s AND key_version = %s
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (signed_by, key_version),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT key_id, public_key_pem, key_version, key_storage_mode
+                FROM officer_keys
+                WHERE officer_id = %s AND is_current = TRUE
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (signed_by,),
+            )
+        signing_key_row = cur.fetchone()
+        if not signing_key_row or not signing_key_row.get("public_key_pem"):
+            return jsonify({"error": "Officer signing public key was not found in PKI"}), 403
+        key_version = int(signing_key_row.get("key_version") or 1)
 
         # Update document_sign_requests
         cur.execute(
@@ -1649,9 +1715,8 @@ def complete_document_sign_request(request_id):
             (signed_by, Json({"signed_by": signed_by}), request_id),
         )
 
-        # Insert signature record if provided
         doc_id = row.get("doc_id")
-        if signature_b64 and doc_id:
+        if doc_id:
             cur.execute(
                 """
                 SELECT cert_pem
@@ -1660,15 +1725,16 @@ def complete_document_sign_request(request_id):
                   AND subject_id = %s
                   AND is_active = TRUE
                   AND expires_at > NOW()
+                  AND metadata->>'cert_profile' = 'signing'
                 ORDER BY created_at DESC LIMIT 1
                 """,
                 (signed_by,),
             )
             cert_row = cur.fetchone()
-            cert_pem = cert_pem_from_client or (cert_row.get("cert_pem") if cert_row else None)
+            cert_pem = cert_row.get("cert_pem") if cert_row else None
             if not cert_pem:
                 return jsonify({
-                    "error": "PKCS7 signing requires officer active cert_pem"
+                    "error": "PKCS7 packaging requires an active officer business signing certificate"
                 }), 400
 
             cur.execute(
@@ -1678,6 +1744,24 @@ def complete_document_sign_request(request_id):
             doc_row = cur.fetchone()
             document_b64 = (doc_row.get("document_base64") if doc_row else None) or ""
             document_bytes = base64.b64decode(document_b64)
+
+            verify_response = requests.post(
+                f"{DOC_SERVICE_URL.rstrip('/')}/api/documents/verify",
+                json={
+                    "document_base64": document_b64,
+                    "signature": signature_b64,
+                    "signature_algorithm": signature_algorithm,
+                    "public_key_b64": base64.b64encode(signing_key_row.get("public_key_pem").encode("utf-8")).decode("ascii"),
+                },
+                timeout=30,
+            )
+            verify_result = verify_response.json() if verify_response.content else {}
+            if not (verify_response.ok and verify_result.get("valid") is True):
+                return jsonify({
+                    "error": "Signature verification failed",
+                    "detail": verify_result.get("error") if isinstance(verify_result, dict) else None,
+                }), 400
+
             signature_pkcs7_b64 = _generate_pkcs7_der_b64(document_bytes, cert_pem, signature_b64)
 
             sig_id = data.get("sig_id") or f"sig-{uuid.uuid4().hex[:12]}"
@@ -1974,8 +2058,8 @@ def register_officer():
     """Registration endpoint for OFFICER accounts.
 
     Officer has two independent keys:
-    - EC key: browser/client mTLS identity certificate.
-    - ML-DSA key: business document signing.
+    - EC key: browser/client mTLS identity certificate, kept on USB/browser token.
+    - ML-DSA key: business document signing, encrypted at rest and decrypted only on a trusted device.
     """
     data = request.get_json(force=True)
     required = ["officer_id", "email", "name", "password"]
@@ -1989,7 +2073,6 @@ def register_officer():
     department = data.get("department", "")
     region_code = data.get("region_code")
     mtls_public_key_pem = (data.get("mtls_public_key_pem") or data.get("public_key_pem") or "").strip()
-    signing_public_key_pem = (data.get("signing_public_key_pem") or data.get("public_key_pem") or "").strip()
     subject_st = (data.get("st") or "HCM").strip()
     subject_l = (data.get("l") or "Q12").strip()
     subject_ou = (data.get("ou") or f"CA {subject_l}").strip()
@@ -2001,14 +2084,8 @@ def register_officer():
         return jsonify({"error": "Password must be at least 8 characters"}), 400
     if not mtls_public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
         return jsonify({"error": "mtls_public_key_pem must be a valid PEM public key"}), 400
-    if not signing_public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
-        return jsonify({"error": "signing_public_key_pem must be a valid PEM public key"}), 400
 
     is_valid_key, validation_error = _validate_ec_public_key(mtls_public_key_pem)
-    if not is_valid_key:
-        return jsonify({"error": validation_error}), 400
-
-    is_valid_key, validation_error = _validate_ml_dsa_public_key(signing_public_key_pem)
     if not is_valid_key:
         return jsonify({"error": validation_error}), 400
 
@@ -2023,28 +2100,19 @@ def register_officer():
         if cur.fetchone():
             return jsonify({"error": "Officer already exists"}), 409
 
-        # Create officer account (no auto key request)
+        # Create officer account. Business-signing key material is provisioned by PKI later.
         cur.execute(
             "INSERT INTO officers (officer_id, email, name, password_hash, password_salt, department, region_code) VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (officer_id, email, data["name"], pwd_hash, salt, department, region_code),
         )
-
-        # Store officer key as current key immediately (no key request workflow)
-        key_id = f"key-{officer_id}-{uuid.uuid4().hex[:8]}"
-        cur.execute(
-            """
-            INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version)
-            VALUES (%s, %s, %s, %s, TRUE, NOW(), NOW() + INTERVAL '365 days', 1)
-            """,
-            (key_id, officer_id, signing_public_key_pem, "ML-DSA-44"),
-        )
         conn.commit()
 
-        # Instead of issuing certificate immediately, create a pending cert request
+        # Create separate pending requests:
+        # - mTLS access certificate: EC public key, packaged later into .p12 by the client/admin.
         request_id = f"certreq-{uuid.uuid4().hex[:12]}"
         cur.execute(
             "INSERT INTO officer_cert_requests (request_id, officer_id, public_key_pem, common_name, organization, country, st, l, ou, status) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (request_id, officer_id, public_key_pem, subject_ou, 'OFFICER', 'VN', subject_st, subject_l, subject_ou, 'PENDING')
+            (request_id, officer_id, mtls_public_key_pem, subject_ou, 'OFFICER', 'VN', subject_st, subject_l, subject_ou, 'PENDING')
         )
         cur.execute(
             """
@@ -2063,20 +2131,19 @@ def register_officer():
                 subject_st,
                 subject_l,
                 subject_ou,
-                Json({"legacy_table": "officer_cert_requests", "key_id": key_id}),
+                Json({"legacy_table": "officer_cert_requests", "purpose": "browser_mtls"}),
             ),
         )
         conn.commit()
-        write_audit("OFFICER_REGISTER", officer_id, "OFFICER", officer_id, details={"email": email, "department": department, "request_id": request_id, "key_id": key_id})
+        write_audit("OFFICER_REGISTER", officer_id, "OFFICER", officer_id, details={"email": email, "department": department, "request_id": request_id})
         return jsonify({
             "officer_id": officer_id,
             "email": email,
             "department": department,
-            "key_id": key_id,
             "request_id": request_id,
             "cert_profile": "mtls_client",
             "created_at": datetime.now(timezone.utc).isoformat(),
-            "message": "Officer account created. Certificate request pending PKI approval."
+            "message": "Officer account created. mTLS certificate request is pending PKI approval. Business signing key is provisioned separately by PKI."
         }), 201
     except Exception as exc:
         conn.rollback()
@@ -2091,7 +2158,7 @@ def register_officer():
 def register_thirdparty():
     """Registration endpoint for THIRDPARTY accounts with pending PKI certificate request."""
     data = request.get_json(force=True)
-    required = ["thirdparty_id", "email", "org_name", "password", "public_key_pem"]
+    required = ["thirdparty_id", "email", "org_name", "password"]
     missing = [field for field in required if not data.get(field)]
     if missing:
         return jsonify({"error": f"Missing field: {missing[0]}"}), 400
@@ -2449,6 +2516,8 @@ def _identity_owner_allowed(subject_type, subject_id):
 
 
 def _store_identity_cert(cur, subject_type, subject_id, cert_id, cert_pem, public_key_pem, not_after, metadata=None):
+    metadata = metadata or {}
+    cert_profile = metadata.get("cert_profile") or "mtls_client"
     cert_obj = x509.load_pem_x509_certificate(cert_pem.encode("utf-8"))
     cert_der = cert_obj.public_bytes(serialization.Encoding.DER)
     thumbprint = hashlib.sha256(cert_der).hexdigest()
@@ -2457,8 +2526,9 @@ def _store_identity_cert(cur, subject_type, subject_id, cert_id, cert_pem, publi
         UPDATE identity_certificates
         SET is_active = FALSE, revoked_at = NOW()
         WHERE subject_type = %s AND subject_id = %s AND is_active = TRUE
+          AND COALESCE(metadata->>'cert_profile', 'mtls_client') = %s
         """,
-        (subject_type, subject_id),
+        (subject_type, subject_id, cert_profile),
     )
     cur.execute(
         """
@@ -2473,7 +2543,7 @@ def _store_identity_cert(cur, subject_type, subject_id, cert_id, cert_pem, publi
           expires_at = EXCLUDED.expires_at,
           metadata = EXCLUDED.metadata
         """,
-        (cert_id, subject_type, subject_id, cert_pem, public_key_pem, thumbprint, not_after, Json(metadata or {})),
+        (cert_id, subject_type, subject_id, cert_pem, public_key_pem, thumbprint, not_after, Json(metadata)),
     )
     return thumbprint
 
@@ -2506,7 +2576,7 @@ def list_officer_cert_requests():
         cur.execute(
             """
             SELECT request_id, subject_type, subject_id, subject_id AS officer_id,
-                   key_algorithm, cert_profile, common_name, organization, country, st, l, ou, status, cert_id,
+                   public_key_pem, csr_pem, key_algorithm, cert_profile, common_name, organization, country, st, l, ou, status, cert_id,
                    created_at, reviewed_at, reviewed_by, metadata
             FROM identity_cert_requests
             ORDER BY created_at DESC LIMIT %s OFFSET %s
@@ -2548,47 +2618,6 @@ def approve_officer_cert_request(request_id):
         subject_id = row.get("subject_id") or row.get("officer_id")
         cert_profile = row.get("cert_profile") or "mtls_client"
 
-        if cert_profile == "signing" and subject_type == "officer":
-            if old_key_id:
-                cur.execute(
-                    "UPDATE officer_keys SET is_current = FALSE, expires_at = NOW() WHERE key_id = %s",
-                    (old_key_id,)
-                )
-            cur.execute(
-                "UPDATE officer_keys SET is_current = FALSE WHERE officer_id = %s AND is_current = TRUE",
-                (subject_id,)
-            )
-            key_id = f"key-{subject_id}-{uuid.uuid4().hex[:8]}"
-            cur.execute(
-                """
-                INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version)
-                VALUES (%s, %s, %s, %s, TRUE, NOW(), NOW() + INTERVAL '365 days',
-                    (SELECT COALESCE(MAX(key_version), 0) + 1 FROM officer_keys WHERE officer_id = %s))
-                """,
-                (key_id, subject_id, row.get("public_key_pem"), row.get("key_algorithm") or "ML-DSA-44", subject_id)
-            )
-            cur.execute(
-                "UPDATE identity_cert_requests SET status = %s, cert_id = %s, reviewed_at = NOW(), reviewed_by = %s WHERE request_id = %s",
-                ('ISSUED', key_id, getattr(g, 'current_user_id', 'pki_admin'), request_id)
-            )
-            conn.commit()
-            write_audit(
-                "SIGNING_KEY_APPROVED",
-                getattr(g, 'current_user_id', 'pki_admin'),
-                "CERT_REQUEST",
-                request_id,
-                details={"key_id": key_id, "subject_type": subject_type, "subject_id": subject_id, "renewal": is_renewal},
-            )
-            return jsonify({
-                "request_id": request_id,
-                "cert_id": key_id,
-                "key_id": key_id,
-                "subject_type": subject_type,
-                "subject_id": subject_id,
-                "renewal": is_renewal,
-                "message": "Signing key request approved."
-            }), 200
-
         # Call PKI service to issue certificate
         payload = {
             "subject_id": subject_id,
@@ -2604,6 +2633,7 @@ def approve_officer_cert_request(request_id):
             "cert_profile": cert_profile,
             "key_algorithm": row.get("key_algorithm"),
             "public_key_pem": row.get("public_key_pem"),
+            "csr_pem": row.get("csr_pem"),
             "allow_reissue": True,
         }
         try:
@@ -2649,25 +2679,66 @@ def approve_officer_cert_request(request_id):
                 (subject_id,)
             )
 
-        # Mark new key as current for renewal
-        if is_renewal and subject_type == "officer":
+        issued_key_id = None
+        if cert_profile == "signing" and subject_type == "officer":
+            if old_key_id:
+                cur.execute(
+                    "UPDATE officer_keys SET is_current = FALSE, expires_at = NOW() WHERE key_id = %s",
+                    (old_key_id,),
+                )
             cur.execute(
                 "UPDATE officer_keys SET is_current = FALSE WHERE officer_id = %s AND is_current = TRUE",
-                (subject_id,)
+                (subject_id,),
             )
-            key_id = f"key-{subject_id}-{uuid.uuid4().hex[:8]}"
+            issued_key_id = metadata.get("key_id")
+            if issued_key_id:
+                cur.execute(
+                    """
+                    UPDATE officer_keys
+                    SET public_key_pem = %s, key_type = %s, is_current = TRUE, expires_at = %s, key_storage_mode = 'encrypted_vault'
+                    WHERE key_id = %s AND officer_id = %s
+                    """,
+                    (row.get("public_key_pem"), row.get("key_algorithm") or "ML-DSA-44", not_after, issued_key_id, subject_id),
+                )
+                if cur.rowcount == 0:
+                    issued_key_id = None
+            if not issued_key_id:
+                issued_key_id = f"key-{subject_id}-{uuid.uuid4().hex[:8]}"
+                cur.execute(
+                    """
+                    INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version, key_storage_mode)
+                    VALUES (%s, %s, %s, %s, TRUE, NOW(), %s,
+                        (SELECT COALESCE(MAX(key_version), 0) + 1 FROM officer_keys WHERE officer_id = %s), 'encrypted_vault')
+                    """,
+                    (issued_key_id, subject_id, row.get("public_key_pem"), row.get("key_algorithm") or "ML-DSA-44", not_after, subject_id),
+                )
+        elif is_renewal and subject_type == "officer":
+            cur.execute(
+                "UPDATE officer_keys SET is_current = FALSE WHERE officer_id = %s AND is_current = TRUE",
+                (subject_id,),
+            )
+            issued_key_id = f"key-{subject_id}-{uuid.uuid4().hex[:8]}"
             cur.execute(
                 """
                 INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version)
-                VALUES (%s, %s, %s, %s, TRUE, NOW(), NOW() + INTERVAL '365 days', 
+                VALUES (%s, %s, %s, %s, TRUE, NOW(), %s,
                     (SELECT COALESCE(MAX(key_version), 0) + 1 FROM officer_keys WHERE officer_id = %s))
                 """,
-                (key_id, subject_id, row.get("public_key_pem"), "ML-DSA-44", subject_id)
+                (issued_key_id, subject_id, row.get("public_key_pem"), "ML-DSA-44", not_after, subject_id),
             )
 
-        _store_identity_cert(cur, subject_type, subject_id, cert_id, cert_pem, row.get("public_key_pem"), not_after, {"request_id": request_id})
+        cert_metadata = {"request_id": request_id, "cert_profile": cert_profile}
+        if issued_key_id:
+            cert_metadata["key_id"] = issued_key_id
+        if cert_profile == "signing" and subject_type == "officer":
+            cert_metadata["key_storage_mode"] = metadata.get("key_storage_mode") or "encrypted_vault"
+        _store_identity_cert(cur, subject_type, subject_id, cert_id, cert_pem, row.get("public_key_pem"), not_after, cert_metadata)
 
         if subject_type == "officer":
+            cur.execute(
+                "UPDATE officer_certificates SET is_active = FALSE, revoked_at = NOW() WHERE officer_id = %s AND is_active = TRUE",
+                (subject_id,),
+            )
             cur.execute(
                 """
                 INSERT INTO officer_certificates (cert_id, officer_id, cert_pem, thumbprint, is_active, created_at, expires_at)
@@ -2736,17 +2807,23 @@ def deny_officer_cert_request(request_id):
 @require_auth
 @require_user_type("officer")
 def request_cert_renewal():
-    """Officer requests certificate renewal with a new public key."""
+    """Officer requests business-signing certificate renewal with a new encrypted local key blob."""
     data = request.get_json(force=True)
     officer_id = g.current_user_id
-    public_key_pem = data.get("public_key_pem", "").strip()
     reason = data.get("reason") or "officer_initiated_renewal"
-    
-    if not public_key_pem:
-        return jsonify({"error": "Missing public_key_pem"}), 400
-    if not public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
-        return jsonify({"error": "Invalid public key PEM format"}), 400
-
+    public_key_pem = (data.get("public_key_pem") or "").strip()
+    encrypted_blob = (data.get("encrypted_private_key_blob") or "").strip()
+    encrypted_format = (data.get("encrypted_private_key_format") or "openssl-enc-aes-256-cbc-pbkdf2").strip()
+    kdf_params = data.get("kdf_params") or {
+        "kdf": "PBKDF2",
+        "digest": "sha256",
+        "iterations": 600000,
+        "cipher": "aes-256-cbc",
+        "salt": "embedded-openssl-salted-format",
+        "format": "openssl-enc",
+    }
+    if not public_key_pem or not encrypted_blob:
+        return jsonify({"error": "Missing public_key_pem or encrypted_private_key_blob"}), 400
     is_valid_key, validation_error = _validate_ml_dsa_public_key(public_key_pem)
     if not is_valid_key:
         return jsonify({"error": validation_error}), 400
@@ -2775,6 +2852,19 @@ def request_cert_renewal():
         # Create renewal request (marked with renewal metadata)
         renewal_request_id = f"certreq-renewal-{officer_id}-{uuid.uuid4().hex[:12]}"
         subject_ou = officer.get("name") or officer.get("officer_id") or officer_id
+        key_id = f"key-{officer_id}-{uuid.uuid4().hex[:8]}"
+        cur.execute("UPDATE officer_keys SET is_current = FALSE, rotated_at = NOW() WHERE officer_id = %s AND is_current = TRUE", (officer_id,))
+        cur.execute(
+            """
+            INSERT INTO officer_keys
+              (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version,
+               encrypted_private_key_blob, encrypted_private_key_format, kdf_params, key_storage_mode)
+            VALUES (%s, %s, %s, 'ML-DSA-44', TRUE, NOW(), NOW() + INTERVAL '365 days',
+              (SELECT COALESCE(MAX(key_version), 0) + 1 FROM officer_keys WHERE officer_id = %s),
+              %s, %s, %s, 'encrypted_vault')
+            """,
+            (key_id, officer_id, public_key_pem, officer_id, encrypted_blob, encrypted_format, Json(kdf_params)),
+        )
         
         cur.execute(
             """
@@ -2797,7 +2887,13 @@ def request_cert_renewal():
                 "Q12",
                 subject_ou,
                 "PENDING",
-                json.dumps({"renewal": True, "reason": reason, "current_key_id": current_key.get("key_id") if current_key else None})
+                json.dumps({
+                    "renewal": True,
+                    "reason": reason,
+                    "current_key_id": current_key.get("key_id") if current_key else None,
+                    "key_id": key_id,
+                    "key_storage_mode": "encrypted_vault",
+                })
             )
         )
         conn.commit()
@@ -3064,15 +3160,27 @@ def download_identity_certificate_once(cert_id):
 @require_auth
 @require_user_type("pki_admin")
 def create_officer_key(officer_id):
-    """Issue or reissue the current officer key. PKI admins only."""
+    """Provision encrypted officer business-signing key material. PKI admins only."""
     data = request.get_json(force=True)
-    public_key_pem = data.get("public_key_pem")
-    key_type = data.get("key_type", "ML-DSA")
+    public_key_pem = (data.get("public_key_pem") or "").strip()
+    encrypted_blob = (data.get("encrypted_private_key_blob") or data.get("encrypted_private_key") or "").strip()
+    encrypted_format = (data.get("encrypted_private_key_format") or "openssl-enc-aes-256-cbc-pbkdf2").strip()
+    kdf_params = data.get("kdf_params") or {
+        "kdf": "PBKDF2",
+        "digest": "sha256",
+        "iterations": 600000,
+        "cipher": "aes-256-cbc",
+        "salt": "embedded-openssl-salted-format",
+        "format": "openssl-enc",
+    }
+    key_type = data.get("key_type", "ML-DSA-44")
     request_id = data.get("request_id")
     expires_at_value = data.get("expires_at")
     
     if not public_key_pem:
         return jsonify({"error": "Missing public_key_pem"}), 400
+    if not encrypted_blob:
+        return jsonify({"error": "Missing encrypted_private_key_blob"}), 400
     if key_type.strip().upper() not in ALLOWED_OFFICER_KEY_ALGORITHMS:
         return jsonify({"error": "Only ML-DSA officer keys are supported"}), 400
 
@@ -3126,10 +3234,12 @@ def create_officer_key(officer_id):
         )
         cur.execute(
             """
-            INSERT INTO officer_keys (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version)
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s)
+            INSERT INTO officer_keys
+              (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version,
+               encrypted_private_key_blob, encrypted_private_key_format, kdf_params, key_storage_mode)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, 'encrypted_vault')
             """,
-            (key_id, officer_id, public_key_pem, key_type, True, expires_at, key_version),
+            (key_id, officer_id, public_key_pem, key_type, True, expires_at, key_version, encrypted_blob, encrypted_format, Json(kdf_params)),
         )
         if request_id:
             cur.execute(
@@ -3140,15 +3250,46 @@ def create_officer_key(officer_id):
                 """,
                 (g.current_user_id, previous_key["key_id"] if previous_key else None, key_id, request_id, officer_id),
             )
+        signing_request_id = f"certreq-signing-{uuid.uuid4().hex[:12]}"
+        cur.execute(
+            """
+            INSERT INTO identity_cert_requests
+              (request_id, subject_type, subject_id, public_key_pem, key_algorithm, cert_profile,
+               common_name, organization, country, st, l, ou, status, metadata)
+            VALUES (%s, 'officer', %s, %s, %s, 'signing', %s, 'OFFICER', 'VN', 'HCM', 'Q12', %s, 'PENDING', %s)
+            ON CONFLICT (request_id) DO NOTHING
+            """,
+            (
+                signing_request_id,
+                officer_id,
+                public_key_pem,
+                key_type,
+                officer_id,
+                officer_id,
+                Json({"key_id": key_id, "purpose": "document_signing", "key_storage_mode": "encrypted_vault"}),
+            ),
+        )
         conn.commit()
         write_audit(
             "ISSUE_KEY",
             g.current_user_id,
             "OFFICER_KEY",
             key_id,
-            details={"officer_id": officer_id, "request_id": request_id, "region_code": officer.get("region_code")},
+            details={
+                "officer_id": officer_id,
+                "request_id": request_id,
+                "signing_request_id": signing_request_id,
+                "region_code": officer.get("region_code"),
+            },
         )
-        return jsonify({"key_id": key_id, "officer_id": officer_id, "key_version": key_version, "created_at": datetime.now(timezone.utc).isoformat()}), 201
+        return jsonify({
+            "key_id": key_id,
+            "officer_id": officer_id,
+            "key_version": key_version,
+            "signing_request_id": signing_request_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "message": "Encrypted signing key stored. Signing certificate request is pending PKI approval.",
+        }), 201
     except Exception as exc:
         conn.rollback()
         logger.error("create_officer_key failed: %s", exc)
@@ -3253,70 +3394,154 @@ def register_officer_certificate(officer_id):
 @require_auth
 @require_user_type("officer")
 def register_officer_public_key(officer_id):
-    """Officer registers an ML-DSA public key to request certificate issuance."""
     if g.current_user_id != officer_id:
         return jsonify({"error": "Forbidden"}), 403
-    
-    data = request.get_json(force=True) or {}
-    public_key_pem = data.get("public_key_pem", "").strip()
-    key_algorithm = data.get("key_algorithm", "ML-DSA-44").strip()
-    
-    if not public_key_pem:
-        return jsonify({"error": "public_key_pem is required"}), 400
-    if not public_key_pem.startswith("-----BEGIN PUBLIC KEY-----"):
-        return jsonify({"error": "Invalid PEM format"}), 400
-    if key_algorithm.upper() not in ALLOWED_OFFICER_KEY_ALGORITHMS:
-        return jsonify({"error": "Only ML-DSA officer keys are supported"}), 400
 
+    data = request.get_json(force=True) or {}
+    public_key_pem = (data.get("public_key_pem") or "").strip()
+    csr_pem = (data.get("csr_pem") or data.get("csr") or "").strip()
+    encrypted_blob = (data.get("encrypted_private_key_blob") or data.get("encrypted_private_key") or "").strip()
+    encrypted_format = (data.get("encrypted_private_key_format") or "openssl-enc-aes-256-cbc-pbkdf2").strip()
+    kdf_params = data.get("kdf_params") or {
+        "kdf": "PBKDF2",
+        "digest": "sha256",
+        "iterations": 600000,
+        "cipher": "aes-256-cbc",
+        "salt": "embedded-openssl-salted-format",
+        "format": "openssl-enc",
+    }
+    key_type = (data.get("key_type") or "ML-DSA-44").strip()
+
+    if not public_key_pem or not csr_pem or not encrypted_blob:
+        return jsonify({"error": "Missing public_key_pem, csr_pem, or encrypted_private_key_blob"}), 400
+    if key_type.upper() not in ALLOWED_OFFICER_KEY_ALGORITHMS:
+        return jsonify({"error": "Only ML-DSA officer keys are supported"}), 400
     is_valid_key, validation_error = _validate_ml_dsa_public_key(public_key_pem)
     if not is_valid_key:
         return jsonify({"error": validation_error}), 400
-    
+    if "BEGIN CERTIFICATE REQUEST" not in csr_pem:
+        return jsonify({"error": "csr_pem must be a PEM certificate request"}), 400
+
     ensure_schema()
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        # Verify officer exists
-        cur.execute("SELECT officer_id, email FROM officers WHERE officer_id = %s", (officer_id,))
+        cur.execute("SELECT officer_id, name FROM officers WHERE officer_id = %s", (officer_id,))
         officer = cur.fetchone()
         if not officer:
             return jsonify({"error": "Officer not found"}), 404
-        
-        # Rotate the current business signing key when the browser/local token lost it.
+
+        key_id = f"key-{officer_id}-{uuid.uuid4().hex[:8]}"
         cur.execute("SELECT COALESCE(MAX(key_version), 0) AS max_version FROM officer_keys WHERE officer_id = %s", (officer_id,))
         version_row = cur.fetchone() or {}
         key_version = int(version_row.get("max_version") or 0) + 1
         cur.execute(
-            "UPDATE officer_keys SET is_current = FALSE, rotated_at = NOW() WHERE officer_id = %s AND is_current = TRUE",
-            (officer_id,)
+            """
+            INSERT INTO officer_keys
+              (key_id, officer_id, public_key_pem, key_type, is_current, created_at, expires_at, key_version,
+               encrypted_private_key_blob, encrypted_private_key_format, kdf_params, key_storage_mode)
+            VALUES (%s, %s, %s, %s, FALSE, NOW(), NOW() + INTERVAL '365 days', %s, %s, %s, %s, 'encrypted_vault')
+            """,
+            (key_id, officer_id, public_key_pem, key_type, key_version, encrypted_blob, encrypted_format, Json(kdf_params)),
         )
-        
-        # Store the public key
-        key_id = f"key-{officer_id}-{uuid.uuid4().hex[:8]}"
+
+        request_id = f"certreq-signing-{uuid.uuid4().hex[:12]}"
+        subject_ou = officer.get("name") or officer_id
         cur.execute(
             """
-            INSERT INTO officer_keys (key_id, officer_id, key_type, public_key_pem, is_current, created_at, key_version)
-            VALUES (%s, %s, %s, %s, TRUE, NOW(), %s)
+            INSERT INTO identity_cert_requests
+              (request_id, subject_type, subject_id, public_key_pem, csr_pem, key_algorithm, cert_profile,
+               common_name, organization, country, st, l, ou, status, metadata)
+            VALUES (%s, 'officer', %s, %s, %s, %s, 'signing', %s, 'OFFICER', 'VN', 'HCM', 'Q12', %s, 'PENDING', %s)
             """,
-            (key_id, officer_id, key_algorithm, public_key_pem, key_version)
+            (
+                request_id,
+                officer_id,
+                public_key_pem,
+                csr_pem,
+                key_type,
+                subject_ou,
+                subject_ou,
+                Json({"key_id": key_id, "purpose": "document_signing", "key_storage_mode": "encrypted_vault", "request_source": "officer_client_csr"}),
+            ),
         )
-        
         conn.commit()
-        write_audit("REGISTER_PUBLIC_KEY", g.current_user_id, "OFFICER_KEY", key_id, 
-                   details={"officer_id": officer_id, "key_algorithm": key_algorithm})
-        
+        write_audit("REGISTER_SIGNING_CSR", officer_id, "OFFICER_KEY", key_id, details={"request_id": request_id, "key_version": key_version})
         return jsonify({
+            "request_id": request_id,
             "key_id": key_id,
-            "officer_id": officer_id,
-            "key_algorithm": key_algorithm,
             "key_version": key_version,
-            "registered_at": datetime.now(timezone.utc).isoformat(),
-            "next_step": "Officer can now sign documents with the local private key"
+            "status": "PENDING",
+            "message": "CSR and encrypted signing key blob stored. Waiting for PKI approval.",
         }), 201
     except Exception as exc:
         conn.rollback()
         logger.error("register_officer_public_key failed: %s", exc)
         return jsonify({"error": str(exc)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route("/api/storage/officers/<officer_id>/encrypted-signing-key/current", methods=["GET"])
+@require_auth
+def get_officer_encrypted_signing_key(officer_id):
+    """Return only the encrypted business-signing key blob for trusted-device signing."""
+    if g.current_user_type == "officer" and g.current_user_id != officer_id:
+        return jsonify({"error": "Forbidden"}), 403
+    if g.current_user_type not in ("officer", "pki_admin", "storage_admin"):
+        return jsonify({"error": "Forbidden"}), 403
+
+    ensure_schema()
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            SELECT key_id, public_key_pem, key_type, key_version, encrypted_private_key_blob,
+                   encrypted_private_key_format, kdf_params, expires_at, created_at
+            FROM officer_keys
+            WHERE officer_id = %s AND is_current = TRUE
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (officer_id,),
+        )
+        key_row = cur.fetchone()
+        if not key_row:
+            return jsonify({"error": "Officer has no current signing key"}), 404
+        if not key_row.get("encrypted_private_key_blob"):
+            return jsonify({"error": "Current signing key has no encrypted key-vault blob"}), 404
+
+        cur.execute(
+            """
+            SELECT cert_id, cert_pem, expires_at
+            FROM identity_certificates
+            WHERE subject_type = 'officer'
+              AND subject_id = %s
+              AND is_active = TRUE
+              AND expires_at > NOW()
+              AND metadata->>'cert_profile' = 'signing'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (officer_id,),
+        )
+        cert_row = cur.fetchone()
+        write_audit("DOWNLOAD_ENCRYPTED_SIGNING_KEY", g.current_user_id, "OFFICER_KEY", key_row["key_id"], details={"officer_id": officer_id})
+        return jsonify({
+            "officer_id": officer_id,
+            "key_id": key_row.get("key_id"),
+            "key_type": key_row.get("key_type"),
+            "key_version": key_row.get("key_version"),
+            "public_key_pem": key_row.get("public_key_pem"),
+            "encrypted_private_key_blob": key_row.get("encrypted_private_key_blob"),
+            "encrypted_private_key_format": key_row.get("encrypted_private_key_format"),
+            "kdf_params": key_row.get("kdf_params") or {},
+            "expires_at": key_row.get("expires_at").isoformat() if key_row.get("expires_at") else None,
+            "certificate": dict(cert_row) if cert_row else None,
+            "message": "Decrypt only on the trusted device. Do not upload the plaintext private key to the server.",
+        }), 200
     finally:
         cur.close()
         conn.close()
